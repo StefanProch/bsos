@@ -10,17 +10,21 @@ if (MSVC)
                  ${DESTDIR}/lib/libgmp-10.lib
                  ${DESTDIR}/bin/libgmp-10.dll)
 
-    add_custom_command(
-        OUTPUT  ${_output}
-        COMMAND ${CMAKE_COMMAND} -E make_directory ${DESTDIR}/include
-        COMMAND ${CMAKE_COMMAND} -E make_directory ${DESTDIR}/lib
-        COMMAND ${CMAKE_COMMAND} -E make_directory ${DESTDIR}/bin
-        COMMAND ${CMAKE_COMMAND} -E copy ${_srcdir}/include/gmp.h ${DESTDIR}/include/
-        COMMAND ${CMAKE_COMMAND} -E copy ${_srcdir}/lib/win-${DEPS_ARCH}/libgmp-10.lib ${DESTDIR}/lib/
-        COMMAND ${CMAKE_COMMAND} -E copy ${_srcdir}/lib/win-${DEPS_ARCH}/libgmp-10.dll ${DESTDIR}/bin/
+    set(_gmp_sources
+        ${_srcdir}/include/gmp.h
+        ${_srcdir}/lib/win-${DEPS_ARCH}/libgmp-10.lib
+        ${_srcdir}/lib/win-${DEPS_ARCH}/libgmp-10.dll
     )
 
-    add_custom_target(dep_GMP SOURCES ${_output})
+    add_custom_target(dep_GMP
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${DESTDIR}/include ${DESTDIR}/lib ${DESTDIR}/bin
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${_srcdir}/include/gmp.h ${DESTDIR}/include/gmp.h
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${_srcdir}/lib/win-${DEPS_ARCH}/libgmp-10.lib ${DESTDIR}/lib/libgmp-10.lib
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${_srcdir}/lib/win-${DEPS_ARCH}/libgmp-10.dll ${DESTDIR}/bin/libgmp-10.dll
+        BYPRODUCTS ${_output}
+        DEPENDS ${_gmp_sources}
+        VERBATIM
+    )
 
 else ()
     set(_gmp_ccflags "-O2 -DNDEBUG -fPIC -DPIC -Wall -Wmissing-prototypes -Wpointer-arith -pedantic -fomit-frame-pointer -fno-common")
