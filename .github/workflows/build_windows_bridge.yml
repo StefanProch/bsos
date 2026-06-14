@@ -45,6 +45,14 @@ jobs:
         run: |
           cmake -S . -B build -G "Ninja Multi-Config" -DORCA_TOOLS=ON
 
+      - name: Cache WSL rootfs
+        uses: actions/cache@v5
+        with:
+          path: tools/slicer_linux_runtime/rootfs/windows-wsl2-rootfs.tar
+          key: wsl-rootfs-ubuntu-24.04-v1-${{ hashFiles('tools/slicer_linux_runtime/rootfs/build_windows_wsl_rootfs.sh') }}
+          restore-keys: |
+            wsl-rootfs-ubuntu-24.04-v1-
+
       - name: Build linux host runtime and WSL rootfs
         shell: bash
         run: |

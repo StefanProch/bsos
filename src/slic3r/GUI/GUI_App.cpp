@@ -2505,6 +2505,11 @@ std::string get_system_info()
     return out.str();
 }
 
+static void prepare_windows_slicer_linux_runtime(const boost::filesystem::path& component_folder,
+                                                const boost::filesystem::path& component_cache_dir);
+static void prepare_macos_slicer_linux_runtime(const boost::filesystem::path& component_folder,
+                                              const boost::filesystem::path& component_cache_dir);
+
 bool GUI_App::on_init_inner()
 {
     wxLog::SetActiveTarget(new wxBoostLog());
