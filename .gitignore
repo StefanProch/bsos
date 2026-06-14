@@ -22,6 +22,9 @@ build.ninja
 *.dylib
 *.dll
 *.exe
+!tools/msgfmt.exe
+!tools/msgmerge.exe
+!tools/xgettext.exe
 *.app
 *.log
 

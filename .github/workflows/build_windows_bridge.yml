@@ -104,8 +104,12 @@ jobs:
               $ver = "PR" + $prNumber
           } else {
               $versionContent = Get-Content version.inc -Raw
-              if ($versionContent -match 'set\(SoftFever_VERSION "(.*?)"\)') {
+              if ($versionContent -match 'set\(SLIC3R_VERSION "(.*?)"\)') {
                   $ver = $matches[1]
+              } elseif ($versionContent -match 'set\(SoftFever_VERSION "(.*?)"\)') {
+                  $ver = $matches[1]
+              } else {
+                  $ver = "git" + $env:GITHUB_SHA.Substring(0, 7)
               }
               $ver = "V$ver"
           }

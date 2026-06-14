@@ -229,7 +229,10 @@ echo -n "[9/9] Generating Linux app..."
     # so rely on the host WebKitGTK runtime instead of copying the helper stack.
 
     mapfile -d '' BUNDLE_TARGETS < <(find "$BIN_DIR" "$LIB_DIR" "$LIBEXEC_DIR" -type f -print0 2>/dev/null)
-    bundle_dependency_closure "$PRIVATE_LIB_DIR" "${BUNDLE_TARGETS[@]}"
+    ORIGINAL_BINARY_DIR="$(dirname "$ORIGINAL_BINARY_LOCATION")"
+    APPIMAGE_DEPENDENCY_PATH="$PRIVATE_LIB_DIR:$BIN_DIR:$LIB_DIR:$ORIGINAL_BINARY_DIR:@CMAKE_PREFIX_PATH@/lib"
+    LD_LIBRARY_PATH="$APPIMAGE_DEPENDENCY_PATH${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+        bundle_dependency_closure "$PRIVATE_LIB_DIR" "${BUNDLE_TARGETS[@]}"
 
 cat << EOF >"$LIBEXEC_DIR/@SLIC3R_APP_CMD@-env"
 #!/bin/sh

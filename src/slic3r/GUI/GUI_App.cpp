@@ -1484,8 +1484,13 @@ int GUI_App::install_plugin(std::string name, std::string package_name, InstallP
 
     if (pro_fn)
         pro_fn(InstallStatusInstallCompleted, 100, cancel);
-    if (name == "plugins")
+    if (name == "plugins") {
         app_config->set_bool("installed_networking", true);
+        app_config->add_cloud_provider(BBL_CLOUD_PROVIDER);
+        app_config->save();
+        if (mainframe && mainframe->m_webview)
+            mainframe->m_webview->SendCloudProvidersInfo();
+    }
     BOOST_LOG_TRIVIAL(info) << "[install_plugin] success";
     return 0;
 }
