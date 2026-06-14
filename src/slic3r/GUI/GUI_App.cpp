@@ -2879,6 +2879,415 @@ bool GUI_App::on_init_inner()
     return true;
 }
 
+
+bool GUI_App::on_init_network(bool try_backup)
+{
+    const bool should_load_networking_plugin = app_config && app_config->get_bool("installed_networking");
+    bool create_network_agent = false;
+
+    const auto mark_networking_need_update = [this]() {
+        m_networking_need_update = true;
+    };
+
+    std::string config_version = get_latest_network_version();
+
+#if defined(__LINUX__)
+    {
+        const auto native_ca_bundle = boost::filesystem::path(resources_dir()) / "cert" / "ca-certificates.crt";
+        if (boost::filesystem::exists(native_ca_bundle)) {
+            ::setenv("SSL_CERT_FILE", native_ca_bundle.string().c_str(), 1);
+            ::setenv("CURL_CA_BUNDLE", native_ca_bundle.string().c_str(), 1);
+            ::setenv("SSL_CERT_DIR", "/etc/ssl/certs", 1);
+            BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": configured native Linux CA bundle: " << native_ca_bundle.string();
+        } else {
+            BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << ": native Linux CA bundle not found: " << native_ca_bundle.string();
+        }
+    }
+#endif
+
+    if (app_config && app_config->get_network_plugin_version() != config_version) {
+        app_config->set(SETTING_NETWORK_PLUGIN_VERSION, config_version);
+        app_config->save();
+    }
+
+    if (should_load_networking_plugin) {
+        if (config_version.empty()) {
+            BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": no version configured, need to download";
+            mark_networking_need_update();
+        } else {
+            int load_agent_dll = Slic3r::NetworkAgent::initialize_network_module(false, config_version);
+        __retry:
+            if (!load_agent_dll) {
+                BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": on_init_network, load dll ok";
+
+                std::string loaded_version = Slic3r::NetworkAgent::get_version();
+                if (app_config && !loaded_version.empty() && loaded_version != "00.00.00.00") {
+                    std::string configured_version = app_config->get_network_plugin_version();
+                    std::string config_base = extract_base_version(configured_version);
+                    if (config_base != loaded_version) {
+                        BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": syncing config version from " << configured_version << " to loaded " << loaded_version;
+                        app_config->set(SETTING_NETWORK_PLUGIN_VERSION, loaded_version);
+                        app_config->save();
+                    }
+                }
+
+                if (check_networking_version()) {
+                    BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": on_init_network, compatibility version";
+                    if (Slic3r::SlicerLinuxRuntime::enabled()) {
+                        create_network_agent = true;
+                    } else {
+                        auto bambu_source = Slic3r::NetworkAgent::get_bambu_source_entry();
+                        if (!bambu_source) {
+                            BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": can not get bambu source module";
+                            m_networking_compatible = false;
+                            mark_networking_need_update();
+                        } else {
+                            create_network_agent = true;
+                        }
+                    }
+                } else {
+                    if (try_backup) {
+                        int result = Slic3r::NetworkAgent::unload_network_module();
+                        BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": version mismatch, unload_network_module, result = " << result;
+                        load_agent_dll = Slic3r::NetworkAgent::initialize_network_module(true, config_version);
+                        try_backup = false;
+                        goto __retry;
+                    }
+                    BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": version mismatch, need network module update";
+                    mark_networking_need_update();
+                }
+            } else {
+                BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": on_init_network, load dll failed";
+                BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": on_init_network, need network module update";
+                mark_networking_need_update();
+            }
+        }
+    }
+
+    if (create_network_agent) {
+        BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": create network agent";
+        std::string data_directory = data_dir();
+
+        Slic3r::NetworkAgentFactory::register_all_agents();
+
+        std::unique_ptr<Slic3r::NetworkAgent> agent_ptr = Slic3r::create_agent_from_config(data_directory, app_config);
+        m_agent = agent_ptr.release();
+        if (!m_agent || !m_agent->get_network_agent()) {
+            BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << ": create network agent returned null handle";
+            delete m_agent;
+            m_agent = nullptr;
+            m_networking_compatible = false;
+            mark_networking_need_update();
+            create_network_agent = false;
+        }
+
+        if (create_network_agent) {
+            if (!m_device_manager)
+                m_device_manager = new Slic3r::DeviceManager(m_agent);
+            else
+                m_device_manager->set_agent(m_agent);
+
+            if (!m_user_manager)
+                m_user_manager = new Slic3r::UserManager(m_agent);
+            else
+                m_user_manager->set_agent(m_agent);
+
+            if (this->is_enable_multi_machine()) {
+                if (!m_task_manager) {
+                    m_task_manager = new Slic3r::TaskManager(m_agent);
+                    m_task_manager->start();
+                }
+                m_device_manager->EnableMultiMachine(true);
+            } else {
+                m_device_manager->EnableMultiMachine(false);
+            }
+
+            m_agent->set_config_dir(data_directory);
+            m_agent->init_log();
+            m_agent->set_cert_file(resources_dir() + "/cert", "slicer_base64.cer");
+
+            init_networking_callbacks();
+            std::string country_code = app_config->get_country_code();
+            m_agent->set_country_code(country_code);
+            m_agent->start();
+            check_track_enable();
+        }
+    }
+
+    if (!create_network_agent) {
+        int result = Slic3r::NetworkAgent::unload_network_module();
+        BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": fallback, unload_network_module, result = " << result;
+
+        if (!m_device_manager)
+            m_device_manager = new Slic3r::DeviceManager();
+        else
+            m_device_manager->set_agent(nullptr);
+
+        if (!m_user_manager)
+            m_user_manager = new Slic3r::UserManager();
+        else
+            m_user_manager->set_agent(nullptr);
+    }
+
+    if (should_load_networking_plugin && m_networking_compatible && !NetworkAgent::use_legacy_network) {
+        app_config->clear_remind_network_update_later();
+
+        if (has_network_update_available()) {
+            std::string latest = get_latest_network_version();
+
+            bool should_prompt = !app_config->is_network_update_prompt_disabled()
+                && !app_config->is_network_version_skipped(latest)
+                && !app_config->should_remind_network_update_later();
+
+            if (should_prompt) {
+                CallAfter([this]() {
+                    show_network_plugin_download_dialog(true);
+                });
+            }
+        }
+    }
+
+    return true;
+}
+
+unsigned GUI_App::get_colour_approx_luma(const wxColour& colour)
+{
+    double r = colour.Red();
+    double g = colour.Green();
+    double b = colour.Blue();
+
+    return std::round(std::sqrt(
+        r * r * .241 +
+        g * g * .691 +
+        b * b * .068));
+}
+
+void GUI_App::switch_printer_agent()
+{
+    if (!m_agent) {
+        BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << ": no agent exists";
+        return;
+    }
+
+    std::string effective_agent_id = ORCA_PRINTER_AGENT_ID;
+    std::string cloud_agent_id = ORCA_CLOUD_PROVIDER;
+    if (preset_bundle->is_bbl_vendor()) {
+        effective_agent_id = BBL_PRINTER_AGENT_ID;
+        cloud_agent_id = BBL_CLOUD_PROVIDER;
+    } else {
+        const DynamicPrintConfig& config = preset_bundle->printers.get_edited_preset().config;
+        if (config.has("printer_agent")) {
+            const std::string& value = config.option<ConfigOptionString>("printer_agent")->value;
+            if (!value.empty())
+                effective_agent_id = value;
+        }
+    }
+
+    if (!NetworkAgentFactory::is_printer_agent_registered(effective_agent_id)) {
+        BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << ": unregistered agent ID '" << effective_agent_id << "', keeping current agent";
+        return;
+    }
+
+    std::string current_agent_id;
+    if (m_agent->get_printer_agent())
+        current_agent_id = m_agent->get_printer_agent()->get_agent_info().id;
+
+    if (current_agent_id != effective_agent_id) {
+        std::string log_dir = data_dir();
+        std::shared_ptr<ICloudServiceAgent> cloud_agent = m_agent->get_cloud_agent(cloud_agent_id);
+
+        std::shared_ptr<IPrinterAgent> new_printer_agent =
+            NetworkAgentFactory::create_printer_agent_by_id(effective_agent_id, cloud_agent, log_dir);
+
+        if (!new_printer_agent) {
+            BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << ": failed to create agent '" << effective_agent_id << "', keeping current agent";
+            return;
+        }
+
+        m_agent->set_printer_agent(new_printer_agent);
+        sidebar().update_all_preset_comboboxes();
+
+        BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": printer agent switched to " << effective_agent_id;
+
+        select_machine(effective_agent_id);
+    }
+}
+
+void GUI_App::select_machine(const std::string& agent_id)
+{
+    if (agent_id == BBL_PRINTER_AGENT_ID)
+        return;
+
+    if (!m_device_manager || !preset_bundle) {
+        BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << ": no device manager or preset bundle";
+        return;
+    }
+
+    const auto& preset = preset_bundle->printers.get_edited_preset();
+    const DynamicPrintConfig* host_cfg = &preset.config;
+
+    std::string print_host = host_cfg->opt_string("print_host");
+    if (print_host.empty())
+        return;
+
+    std::string port = host_cfg->opt_string("printhost_port");
+    std::string dev_id = MachineObject::dev_id_from_address(print_host, port);
+
+    MachineObject* existing = m_device_manager->get_local_machine(dev_id);
+
+    if (!existing) {
+        auto local_machines = m_device_manager->get_local_machinelist();
+        for (auto& [id, machine] : local_machines) {
+            if (machine && machine->get_dev_ip() == dev_id) {
+                existing = machine;
+                break;
+            }
+        }
+    }
+
+    if (!existing) {
+        BBLocalMachine machine;
+        machine.dev_id = dev_id;
+        machine.dev_ip = dev_id;
+        machine.dev_name = dev_id;
+        machine.printer_type = preset.config.opt_string("printer_model");
+        auto access_code = preset.config.opt_string("printhost_apikey");
+        if (access_code.empty())
+            access_code = "88888888";
+
+        existing = m_device_manager->insert_local_device(machine, "lan", "free", "", access_code);
+
+        if (!existing) {
+            BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << ": failed to create machine dev_id=" << dev_id;
+            return;
+        }
+        BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": created new machine dev_id=" << dev_id;
+    }
+    existing->local_use_ssl = boost::istarts_with(print_host, "https://");
+
+    if (mainframe && mainframe->m_monitor) {
+        mainframe->m_monitor->select_machine(dev_id);
+        BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": triggered select_machine for dev_id=" << dev_id;
+    } else {
+        m_device_manager->set_selected_machine(dev_id);
+        BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": fallback set_selected_machine dev_id=" << dev_id;
+    }
+}
+
+bool GUI_App::dark_mode()
+{
+#ifdef SUPPORT_DARK_MODE
+#if __APPLE__
+    return wxPlatformInfo::Get().CheckOSVersion(10, 14) && mac_dark_mode();
+#else
+    const auto& val = wxGetApp().app_config->get("dark_color_mode");
+    if (val == "1") return true;
+    if (val == "0") return false;
+    return check_dark_mode();
+#endif
+#else
+    return false;
+#endif
+}
+
+const wxColour GUI_App::get_label_default_clr_system()
+{
+    return dark_mode() ? wxColour(115, 220, 103) : wxColour(26, 132, 57);
+}
+
+const wxColour GUI_App::get_label_default_clr_modified()
+{
+    return dark_mode() ? wxColour(253, 111, 40) : wxColour(252, 77, 1);
+}
+
+void GUI_App::init_label_colours()
+{
+    bool is_dark_mode = dark_mode();
+    m_color_label_modified = is_dark_mode ? wxColour("#F1754E") : wxColour("#F1754E");
+    m_color_label_sys = is_dark_mode ? wxColour("#B2B3B5") : wxColour("#363636");
+
+#if defined(_WIN32) || defined(__linux__) || defined(__APPLE__)
+    m_color_label_default = is_dark_mode ? wxColour(250, 250, 250) : m_color_label_sys;
+    m_color_highlight_label_default = is_dark_mode ? wxColour(230, 230, 230) : wxSystemSettings::GetColour(wxSYS_COLOUR_WINDOWTEXT);
+    m_color_highlight_default = is_dark_mode ? wxColour("#36363B") : wxColour("#F1F1F1");
+    m_color_hovered_btn_label = is_dark_mode ? wxColour(255, 255, 254) : wxColour(0, 0, 0);
+    m_color_default_btn_label = is_dark_mode ? wxColour(255, 255, 254) : wxColour(0, 0, 0);
+    m_color_selected_btn_bg = is_dark_mode ? wxColour(84, 84, 91) : wxColour(206, 206, 206);
+#else
+    m_color_label_default = wxSystemSettings::GetColour(wxSYS_COLOUR_WINDOWTEXT);
+#endif
+    m_color_window_default = is_dark_mode ? wxColour(43, 43, 43) : wxSystemSettings::GetColour(wxSYS_COLOUR_WINDOW);
+    StateColor::SetDarkMode(is_dark_mode);
+}
+
+void GUI_App::update_label_colours_from_appconfig()
+{
+    if (app_config->has("label_clr_sys")) {
+        auto str = app_config->get("label_clr_sys");
+        if (str != "")
+            m_color_label_sys = wxColour(str);
+    }
+
+    if (app_config->has("label_clr_modified")) {
+        auto str = app_config->get("label_clr_modified");
+        if (str != "")
+            m_color_label_modified = wxColour(str);
+    }
+}
+
+void GUI_App::update_publish_status()
+{
+    // mainframe->show_publish_button(has_model_mall());
+    // if (app_config->get("staff_pick_switch") == "true") {
+    //     mainframe->m_webview->SendDesignStaffpick(has_model_mall());
+    // }
+}
+
+bool GUI_App::has_model_mall()
+{
+    if (auto cc = app_config->get_region(); cc == "CNH" || cc == "China" || cc == "")
+        return false;
+    return true;
+}
+
+void GUI_App::update_label_colours()
+{
+    for (Tab* tab : tabs_list)
+        tab->update_label_colours();
+}
+
+void GUI_App::init_fonts()
+{
+    m_small_font = Label::Body_10;
+    m_bold_font = Label::Body_10.Bold();
+    m_normal_font = Label::Body_10;
+
+#ifdef __WXMAC__
+    m_small_font.SetPointSize(11);
+    m_bold_font.SetPointSize(13);
+#endif
+
+    m_code_font = wxFont(wxFontInfo().Family(wxFONTFAMILY_TELETYPE));
+    m_code_font.SetPointSize(m_small_font.GetPointSize());
+}
+
+void GUI_App::update_fonts(const MainFrame* main_frame)
+{
+    if (main_frame == nullptr)
+        main_frame = this->mainframe;
+    m_normal_font = Label::Body_14;
+    m_small_font = m_normal_font;
+    m_bold_font = m_normal_font.Bold();
+    m_link_font = m_bold_font.Underlined();
+    m_em_unit = main_frame->em_unit();
+    m_code_font.SetPointSize(m_small_font.GetPointSize());
+}
+
+void GUI_App::set_label_clr_modified(const wxColour& clr)
+{
+    return;
+}
+
 void GUI_App::set_label_clr_sys(const wxColour& clr)
 {
     return;
