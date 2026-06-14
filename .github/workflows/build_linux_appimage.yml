@@ -87,7 +87,23 @@ jobs:
           mkdir -p out
 
           ./build_linux.sh -istrlL
-          ./scripts/check_appimage_libs.sh ./build/package ./build/package/bin/orca-slicer
+
+          app_bin=""
+          for candidate in \
+            ./build/package/bin/bambu-studio \
+            ./build/package/bin/orca-slicer \
+            ./build/package/bin/OrcaSlicer; do
+            if [ -x "$candidate" ]; then
+              app_bin="$candidate"
+              break
+            fi
+          done
+          if [ -z "$app_bin" ]; then
+            echo "ERROR: packaged app binary not found"
+            find ./build/package -maxdepth 3 -type f | LC_ALL=C sort
+            exit 1
+          fi
+          ./scripts/check_appimage_libs.sh ./build/package "$app_bin"
 
           mapfile -t appimages < <(find build -maxdepth 3 -type f -name '*.AppImage' ! -name 'appimagetool.AppImage' | LC_ALL=C sort)
 
@@ -103,8 +119,8 @@ jobs:
           fi
 
           appimage="${appimages[0]}"
-          mv "$appimage" "out/OrcaSlicer-BMCU_Linux_AppImage_${DIST_ID}_amd64_${VER}.AppImage"
-          chmod +x "out/OrcaSlicer-BMCU_Linux_AppImage_${DIST_ID}_amd64_${VER}.AppImage"
+          mv "$appimage" "out/BambuStudio-OrcaSlicer_Linux_AppImage_${DIST_ID}_amd64_${VER}.AppImage"
+          chmod +x "out/BambuStudio-OrcaSlicer_Linux_AppImage_${DIST_ID}_amd64_${VER}.AppImage"
 
       - name: Linux - checksums
         shell: bash
@@ -115,6 +131,6 @@ jobs:
       - name: Upload artifacts (Linux AppImage ubuntu24.04)
         uses: actions/upload-artifact@v7
         with:
-          name: orcaslicer-bmcu-linux-appimage-${{ env.DIST_ID }}-${{ github.sha }}
+          name: bambustudio-orcaslicer-linux-appimage-${{ env.DIST_ID }}-${{ github.sha }}
           path: out/
           if-no-files-found: error

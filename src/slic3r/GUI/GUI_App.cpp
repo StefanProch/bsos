@@ -2876,7 +2876,746 @@ bool GUI_App::on_init_inner()
     if (app_config && app_config->get_network_plugin_version().empty())
         app_config->set(SETTING_NETWORK_PLUGIN_VERSION, get_latest_network_version());
 
+    copy_network_if_available();
+    if (Slic3r::SlicerLinuxRuntime::enabled()) {
+        const boost::filesystem::path component_folder = boost::filesystem::path(data_dir()) / "plugins";
+        const boost::filesystem::path component_cache_dir = boost::filesystem::path(data_dir()) / "ota" / "plugins";
+#ifdef WIN32
+        prepare_windows_slicer_linux_runtime(component_folder, component_cache_dir);
+#elif defined(__APPLE__) || defined(__WXMAC__)
+        prepare_macos_slicer_linux_runtime(component_folder, component_cache_dir);
+#endif
+    }
+    on_init_network();
+
+    if (m_agent && m_agent->is_user_login()) {
+        enable_user_preset_folder(true);
+    } else {
+        enable_user_preset_folder(false);
+    }
+
+    // BBS if load user preset failed
+    //if (loaded_preset_result != 0) {
+        try {
+            // Enable all substitutions (in both user and system profiles), but log the substitutions in user profiles only.
+            // If there are substitutions in system profiles, then a "reconfigure" event shall be triggered, which will force
+            // installation of a compatible system preset, thus nullifying the system preset substitutions.
+            init_params->preset_substitutions = preset_bundle->load_presets(*app_config, ForwardCompatibilitySubstitutionRule::EnableSystemSilent);
+        }
+        catch (const std::exception& ex) {
+            show_error(nullptr, ex.what());
+        }
+    //}
+
+#ifdef WIN32
+    register_win32_device_notification_event();
+#endif // WIN32
+
+    // Let the libslic3r know the callback, which will translate messages on demand.
+    Slic3r::I18N::set_translate_callback(libslic3r_translate_callback);
+
+#if defined(__WXGTK__) && wxHAS_EGL
+    // Configure GL backend before any wxGLCanvas is created.
+    // On X11, prefer GLX for maximum driver compatibility.
+    // On Wayland, EGL is used by default (only option).
+    if (Slic3r::GUI::is_running_on_x11()) {
+        wxGLCanvas::PreferGLX();
+        BOOST_LOG_TRIVIAL(info) << "X11 detected, using GLX for OpenGL context";
+    } else if (Slic3r::GUI::is_running_on_wayland()) {
+        BOOST_LOG_TRIVIAL(info) << "Wayland detected, using EGL for OpenGL context";
+    } else {
+        BOOST_LOG_TRIVIAL(warning) << "Unknown display backend, defaulting to EGL";
+    }
+#endif
+
+    BOOST_LOG_TRIVIAL(info) << "create the main window";
+    mainframe = new MainFrame();
+    // hide settings tabs after first Layout
+    if (is_editor()) {
+        mainframe->select_tab(size_t(0));
+    }
+
+    sidebar().obj_list()->init();
+    //sidebar().aux_list()->init_auxiliary();
+    mainframe->m_project->init_auxiliary();
+
+//     update_mode(); // !!! do that later
+    SetTopWindow(mainframe);
+
+    plater_->init_notification_manager();
+
+    m_printhost_job_queue.reset(new PrintHostJobQueue(mainframe->printhost_queue_dlg()));
+
+    if (is_gcode_viewer()) {
+        mainframe->update_layout();
+        if (plater_ != nullptr)
+            // ensure the selected technology is ptFFF
+            plater_->set_printer_technology(ptFFF);
+    }
+    else
+        load_current_presets();
+
+    if (plater_ != nullptr) {
+        plater_->reset_project_dirty_initial_presets();
+        plater_->update_project_dirty_from_presets();
+        plater_->get_partplate_list().set_filament_count(preset_bundle->filament_presets.size());
+    }
+
+    // BBS:
+#ifdef __WINDOWS__
+    mainframe->topbar()->SaveNormalRect();
+#endif
+    mainframe->Show(true);
+    BOOST_LOG_TRIVIAL(info) << "main frame firstly shown";
+    if (scrn) {
+        scrn->Destroy();
+        scrn = nullptr;
+    }
+
+//#if BBL_HAS_FIRST_PAGE
+    //BBS: set tp3DEditor firstly
+    /*plater_->canvas3D()->enable_render(false);
+    mainframe->select_tab(size_t(MainFrame::tp3DEditor));
+    scrn->SetText(_L("Loading Opengl resourses..."));
+    plater_->select_view_3D("3D");
+    //BBS init the opengl resource here
+    Size canvas_size = plater_->canvas3D()->get_canvas_size();
+    wxGetApp().imgui()->set_display_size(static_cast<float>(canvas_size.get_width()), static_cast<float>(canvas_size.get_height()));
+    wxGetApp().init_opengl();
+    plater_->canvas3D()->init();
+    wxGetApp().imgui()->new_frame();
+    plater_->canvas3D()->enable_render(true);
+    plater_->canvas3D()->render();
+    if (is_editor())
+        mainframe->select_tab(size_t(0));*/
+//#else
+    //plater_->trigger_restore_project(1);
+//#endif
+
+    obj_list()->set_min_height();
+
+    update_mode(); // update view mode after fix of the object_list size
+
+#ifdef __APPLE__
+   other_instance_message_handler()->bring_instance_forward();
+#endif //__APPLE__
+
+    Bind(EVT_HTTP_ERROR, &GUI_App::on_http_error, this);
+
+
+    Bind(wxEVT_IDLE, [this](wxIdleEvent& event)
+    {
+        bool curr_studio_active = this->is_studio_active();
+        if (m_studio_active != curr_studio_active) {
+            if (curr_studio_active) {
+                BOOST_LOG_TRIVIAL(info) << "studio is active, start to subscribe";
+                if (m_agent) {
+                    json j = json::object();
+                    m_agent->start_subscribe("app");
+                }
+            } else {
+                BOOST_LOG_TRIVIAL(info) << "studio is inactive, stop to subscribe";
+                if (m_agent) {
+                    json j = json::object();
+                    m_agent->stop_subscribe("app");
+                }
+            }
+            m_studio_active = curr_studio_active;
+        }
+
+
+        if (! plater_)
+            return;
+
+        // BBS
+        //this->obj_manipul()->update_if_dirty();
+
+        //use m_post_initialized instead
+        //static bool update_gui_after_init = true;
+
+        // An ugly solution to GH #5537 in which GUI_App::init_opengl (normally called from events wxEVT_PAINT
+        // and wxEVT_SET_FOCUS before GUI_App::post_init is called) wasn't called before GUI_App::post_init and OpenGL wasn't initialized.
+//#ifdef __linux__
+//        if (!m_post_initialized && m_opengl_initialized) {
+//#else
+        if (!m_post_initialized && !m_adding_script_handler) {
+//#endif
+            m_post_initialized = true;
+#ifdef WIN32
+            this->mainframe->register_win32_callbacks();
+#endif
+            this->post_init();
+
+            update_publish_status();
+        }
+
+        if (m_post_initialized && app_config->dirty())
+            app_config->save();
+
+    });
+
+    m_initialized = true;
+
+    flush_logs();
+
+    BOOST_LOG_TRIVIAL(info) << "finished the gui app init";
+    if (m_config_corrupted) {
+        m_config_corrupted = false;
+        show_error(nullptr,
+                   _u8L(
+                       "The OrcaSlicer configuration file may be corrupted and cannot be parsed.\nOrcaSlicer has attempted to recreate the "
+                       "configuration file.\nPlease note, application settings will be lost, but printer profiles will not be affected."));
+    }
     return true;
+}
+
+
+void set_runtime_ready_reason(std::string* reason, std::string value)
+{
+    if (reason)
+        *reason = std::move(value);
+}
+
+static const char* legacy_wsl_bootstrap_script_name()
+{
+    return "slicer_linux_runtime_wsl_run_host.sh";
+}
+
+static wxString quote_windows_command_arg(const wxString& value)
+{
+    wxString escaped = value;
+    escaped.Replace("\"", "\\\"");
+    return wxString::Format("\"%s\"", escaped);
+}
+
+static wxString quote_posix_command_arg(const wxString& value)
+{
+    wxString out("'");
+    for (wxUniChar ch : value) {
+        if (ch == '\'')
+            out += "'\\''";
+        else
+            out += ch;
+    }
+    out += "'";
+    return out;
+}
+
+static long run_hidden_windows_command(const wxString& command, wxArrayString* stdout_lines, wxArrayString* stderr_lines)
+{
+#ifdef WIN32
+    wxArrayString local_stdout;
+    wxArrayString local_stderr;
+    long exit_code = wxExecute(command, local_stdout, local_stderr, wxEXEC_SYNC | wxEXEC_HIDE_CONSOLE);
+    if (stdout_lines)
+        *stdout_lines = local_stdout;
+    if (stderr_lines)
+        *stderr_lines = local_stderr;
+    return exit_code;
+#else
+    (void)command;
+    (void)stdout_lines;
+    (void)stderr_lines;
+    return -1;
+#endif
+}
+
+static long run_posix_command_sync(const wxString& command, wxArrayString* stdout_lines, wxArrayString* stderr_lines)
+{
+#if defined(__WXMAC__) || defined(__APPLE__) || defined(__WXGTK__)
+    wxArrayString local_stdout;
+    wxArrayString local_stderr;
+    long exit_code = wxExecute(command, local_stdout, local_stderr, wxEXEC_SYNC);
+    if (stdout_lines)
+        *stdout_lines = local_stdout;
+    if (stderr_lines)
+        *stderr_lines = local_stderr;
+    return exit_code;
+#else
+    (void)command;
+    (void)stdout_lines;
+    (void)stderr_lines;
+    return -1;
+#endif
+}
+
+static void log_runtime_command_output(const char* tag, long exit_code, const wxArrayString& stdout_lines, const wxArrayString& stderr_lines)
+{
+    BOOST_LOG_TRIVIAL(info) << tag << ": exit_code=" << exit_code;
+    for (const auto& line : stdout_lines)
+        BOOST_LOG_TRIVIAL(info) << tag << " [stdout] " << into_u8(line);
+    for (const auto& line : stderr_lines)
+        BOOST_LOG_TRIVIAL(error) << tag << " [stderr] " << into_u8(line);
+}
+
+static void prepare_windows_slicer_linux_runtime(const boost::filesystem::path& component_folder,
+                                                              const boost::filesystem::path& component_cache_dir)
+{
+#ifndef WIN32
+    (void)component_folder;
+    (void)component_cache_dir;
+#else
+    if (!Slic3r::SlicerLinuxRuntime::enabled())
+        return;
+
+    const auto verify_script = component_folder / Slic3r::SlicerLinuxRuntime::windows_wsl_validate_script_file_name();
+    const auto install_script = component_folder / Slic3r::SlicerLinuxRuntime::windows_wsl_import_script_file_name();
+    if (!boost::filesystem::exists(verify_script) || !boost::filesystem::exists(install_script)) {
+        BOOST_LOG_TRIVIAL(warning) << "[slicer_linux_runtime_setup] missing verify/install script in " << component_folder.string();
+        return;
+    }
+
+    const wxString component_dir_wx = from_u8(component_folder.string());
+    const wxString cache_dir_wx = from_u8(component_cache_dir.string());
+    const wxString verify_cmd = wxString::Format(
+        "powershell -NoProfile -ExecutionPolicy Bypass -File %s -PackageDir %s -ComponentCacheDir %s -AllowMissingComponent",
+        quote_windows_command_arg(from_u8(verify_script.string())),
+        quote_windows_command_arg(component_dir_wx),
+        quote_windows_command_arg(cache_dir_wx));
+
+    wxArrayString verify_out;
+    wxArrayString verify_err;
+    long verify_code = run_hidden_windows_command(verify_cmd, &verify_out, &verify_err);
+    log_runtime_command_output("[slicer_linux_runtime_verify]", verify_code, verify_out, verify_err);
+    if (verify_code == 0)
+        return;
+
+    const wxString install_cmd = wxString::Format(
+        "powershell -NoProfile -ExecutionPolicy Bypass -File %s -PackageDir %s -ComponentDir %s -ComponentCacheDir %s",
+        quote_windows_command_arg(from_u8(install_script.string())),
+        quote_windows_command_arg(component_dir_wx),
+        quote_windows_command_arg(component_dir_wx),
+        quote_windows_command_arg(cache_dir_wx));
+
+    wxArrayString install_out;
+    wxArrayString install_err;
+    long install_code = run_hidden_windows_command(install_cmd, &install_out, &install_err);
+    log_runtime_command_output("[slicer_linux_runtime_install]", install_code, install_out, install_err);
+
+    verify_out.clear();
+    verify_err.clear();
+    verify_code = run_hidden_windows_command(verify_cmd, &verify_out, &verify_err);
+    log_runtime_command_output("[slicer_linux_runtime_verify_after_install]", verify_code, verify_out, verify_err);
+#endif
+}
+
+static void prepare_macos_slicer_linux_runtime(const boost::filesystem::path& component_folder,
+                                                            const boost::filesystem::path& component_cache_dir)
+{
+#if !(defined(__WXMAC__) || defined(__APPLE__))
+    (void)component_folder;
+    (void)component_cache_dir;
+#else
+    if (!Slic3r::SlicerLinuxRuntime::enabled())
+        return;
+
+    const auto verify_script = component_folder / Slic3r::SlicerLinuxRuntime::mac_runtime_verify_script_file_name();
+    const auto install_script = component_folder / Slic3r::SlicerLinuxRuntime::mac_runtime_install_script_file_name();
+    if (!boost::filesystem::exists(verify_script) || !boost::filesystem::exists(install_script)) {
+        BOOST_LOG_TRIVIAL(warning) << "[slicer_linux_runtime_setup] missing macOS verify/install script in " << component_folder.string();
+        return;
+    }
+
+    const wxString component_dir_wx = from_u8(component_folder.string());
+    const wxString cache_dir_wx = from_u8(component_cache_dir.string());
+    const wxString verify_cmd = wxString::Format(
+        "/bin/bash %s -PackageDir %s -ComponentDir %s -ComponentCacheDir %s -AllowMissingComponent",
+        quote_posix_command_arg(from_u8(verify_script.string())),
+        quote_posix_command_arg(component_dir_wx),
+        quote_posix_command_arg(component_dir_wx),
+        quote_posix_command_arg(cache_dir_wx));
+
+    wxArrayString verify_out;
+    wxArrayString verify_err;
+    long verify_code = run_posix_command_sync(verify_cmd, &verify_out, &verify_err);
+    log_runtime_command_output("[slicer_linux_runtime_verify_macos]", verify_code, verify_out, verify_err);
+    if (verify_code == 0)
+        return;
+
+    wxMessageDialog prompt(
+        nullptr,
+        _L("The macOS Linux runtime is not ready. The application can install or repair the bundled Lima runtime now."),
+        _L("OrcaSlicer Slicer Linux Runtime"),
+        wxYES_NO | wxICON_QUESTION | wxCENTRE);
+    if (prompt.ShowModal() != wxID_YES)
+        return;
+
+    const wxString install_cmd = wxString::Format(
+        "/bin/bash %s -PackageDir %s -ComponentDir %s -ComponentCacheDir %s -ReplaceExisting",
+        quote_posix_command_arg(from_u8(install_script.string())),
+        quote_posix_command_arg(component_dir_wx),
+        quote_posix_command_arg(component_dir_wx),
+        quote_posix_command_arg(cache_dir_wx));
+
+    wxArrayString install_out;
+    wxArrayString install_err;
+    long install_code = run_posix_command_sync(install_cmd, &install_out, &install_err);
+    log_runtime_command_output("[slicer_linux_runtime_install_macos]", install_code, install_out, install_err);
+
+    verify_out.clear();
+    verify_err.clear();
+    verify_code = run_posix_command_sync(verify_cmd, &verify_out, &verify_err);
+    log_runtime_command_output("[slicer_linux_runtime_verify_after_install_macos]", verify_code, verify_out, verify_err);
+#endif
+}
+
+bool slicer_linux_runtime_ready(const boost::filesystem::path& component_folder, std::string* reason)
+{
+    if (!Slic3r::SlicerLinuxRuntime::enabled()) {
+        set_runtime_ready_reason(reason, "Linux runtime disabled");
+        return true;
+    }
+
+    const auto has_file = [&component_folder](const std::string& file_name) {
+        const auto candidate = component_folder / file_name;
+        return boost::filesystem::exists(candidate) && !boost::filesystem::is_directory(candidate);
+    };
+
+#if defined(__WXMAC__) || defined(__APPLE__)
+    const std::string required_files[] = {
+        Slic3r::SlicerLinuxRuntime::runtime_module_file_name(),
+        Slic3r::SlicerLinuxRuntime::host_executable_file_name(),
+        std::string("slicer_linux_runtime_host_abi1"),
+        std::string("slicer_linux_runtime_host_abi0"),
+        Slic3r::SlicerLinuxRuntime::mac_host_wrapper_file_name(),
+        Slic3r::SlicerLinuxRuntime::mac_runtime_install_script_file_name(),
+        Slic3r::SlicerLinuxRuntime::mac_runtime_verify_script_file_name(),
+        Slic3r::SlicerLinuxRuntime::mac_lima_instance_file_name(),
+        Slic3r::SlicerLinuxRuntime::linux_component_library_name(),
+        Slic3r::SlicerLinuxRuntime::linux_source_library_name(),
+        std::string("ca-certificates.crt"),
+        std::string("slicer_base64.cer"),
+        std::string("ld-linux-x86-64.so.2"),
+        std::string("libc.so.6"),
+        std::string("libm.so.6"),
+        std::string("libresolv.so.2"),
+        std::string("libnss_dns.so.2"),
+        std::string("libnss_files.so.2")
+    };
+#else
+    const std::string required_files[] = {
+        Slic3r::SlicerLinuxRuntime::runtime_module_file_name(),
+        Slic3r::SlicerLinuxRuntime::host_executable_file_name(),
+        std::string("slicer_linux_runtime_host_abi1"),
+        std::string("slicer_linux_runtime_host_abi0"),
+        Slic3r::SlicerLinuxRuntime::windows_wsl_distro_file_name(),
+        Slic3r::SlicerLinuxRuntime::windows_wsl_validate_script_file_name(),
+        Slic3r::SlicerLinuxRuntime::windows_wsl_rootfs_file_name(),
+        Slic3r::SlicerLinuxRuntime::windows_component_cache_subdir_file_name(),
+        Slic3r::SlicerLinuxRuntime::linux_component_library_name(),
+        Slic3r::SlicerLinuxRuntime::linux_source_library_name(),
+        std::string("ca-certificates.crt"),
+        std::string("slicer_base64.cer")
+    };
+#endif
+
+    for (const std::string& file_name : required_files) {
+        if (!has_file(file_name)) {
+            set_runtime_ready_reason(reason, "missing required runtime file: " + file_name);
+            return false;
+        }
+    }
+#if !(defined(__WXMAC__) || defined(__APPLE__))
+    if (!has_file(Slic3r::SlicerLinuxRuntime::windows_wsl_import_script_file_name()) &&
+        !has_file("install-wsl-runtime.ps1")) {
+        set_runtime_ready_reason(reason, "missing required runtime file: " + Slic3r::SlicerLinuxRuntime::windows_wsl_import_script_file_name());
+        return false;
+    }
+
+    if (!has_file(Slic3r::SlicerLinuxRuntime::windows_wsl_bootstrap_script_file_name()) &&
+        !has_file(legacy_wsl_bootstrap_script_name())) {
+        set_runtime_ready_reason(reason, "missing required runtime file: " + Slic3r::SlicerLinuxRuntime::windows_wsl_bootstrap_script_file_name());
+        return false;
+    }
+#endif
+
+    for (const std::string& file_name : {
+            Slic3r::SlicerLinuxRuntime::linux_component_library_name(),
+            Slic3r::SlicerLinuxRuntime::linux_source_library_name()}) {
+        std::string validate_reason;
+        if (!Slic3r::SlicerLinuxRuntime::validate_linux_so_binary((component_folder / file_name).string(), &validate_reason)) {
+            set_runtime_ready_reason(reason, file_name + ": " + validate_reason);
+            return false;
+        }
+    }
+
+    const auto manifest_path = component_folder / Slic3r::SlicerLinuxRuntime::linux_component_manifest_file_name();
+    if (boost::filesystem::exists(manifest_path) && !boost::filesystem::is_directory(manifest_path)) {
+        std::string manifest_reason;
+        if (!Slic3r::SlicerLinuxRuntime::validate_linux_component_set_against_manifest(component_folder, &manifest_reason)) {
+            set_runtime_ready_reason(reason, "Linux component manifest validation failed: " + manifest_reason);
+            return false;
+        }
+    }
+
+    for (const std::string& file_name : {std::string("liblive555.so"), std::string("libagora_rtc_sdk.so"), std::string("libagora-fdkaac.so")}) {
+        if (!has_file(file_name))
+            continue;
+        std::string validate_reason;
+        if (!Slic3r::SlicerLinuxRuntime::validate_linux_so_binary((component_folder / file_name).string(), &validate_reason)) {
+            set_runtime_ready_reason(reason, file_name + ": " + validate_reason);
+            return false;
+        }
+    }
+
+    set_runtime_ready_reason(reason, "ok");
+    return true;
+}
+
+void copy_runtime_file_if_exists(const boost::filesystem::path& src_dir,
+                                          const boost::filesystem::path& dst_dir,
+                                          const std::string& file_name)
+{
+    if (file_name.empty())
+        return;
+
+    const auto src = src_dir / file_name;
+    const auto dst = dst_dir / file_name;
+
+    if (!boost::filesystem::exists(src) || boost::filesystem::is_directory(src))
+        return;
+
+    boost::filesystem::create_directories(dst.parent_path());
+
+    std::string error_message;
+    CopyFileResult cfr = copy_file(src.string(), dst.string(), error_message, false);
+    if (cfr != CopyFileResult::SUCCESS) {
+        BOOST_LOG_TRIVIAL(error) << "[copy_network_if_available] copy runtime file failed: "
+                                 << src.string() << " -> "
+                                 << dst.string() << ", code=" << cfr
+                                 << ", err=" << error_message;
+        return;
+    }
+
+#ifndef WIN32
+    static constexpr const auto perms =
+        fs::owner_read | fs::owner_write | fs::group_read | fs::others_read |
+        fs::owner_exe | fs::group_exe | fs::others_exe;
+    try {
+        fs::permissions(dst, perms);
+    } catch (...) {}
+#endif
+}
+
+void copy_local_runtime_files(const boost::filesystem::path& component_folder)
+{
+    if (!Slic3r::SlicerLinuxRuntime::enabled())
+        return;
+
+    const boost::filesystem::path exe_path(into_u8(wxStandardPaths::Get().GetExecutablePath()));
+    const boost::filesystem::path exe_dir = exe_path.parent_path();
+
+    const std::string helper_files[] = {
+        Slic3r::SlicerLinuxRuntime::windows_wsl_distro_file_name(),
+        Slic3r::SlicerLinuxRuntime::windows_wsl_import_script_file_name(),
+        Slic3r::SlicerLinuxRuntime::windows_wsl_validate_script_file_name(),
+        Slic3r::SlicerLinuxRuntime::windows_wsl_bootstrap_script_file_name(),
+        legacy_wsl_bootstrap_script_name(),
+        Slic3r::SlicerLinuxRuntime::windows_wsl_rootfs_file_name(),
+        Slic3r::SlicerLinuxRuntime::windows_component_cache_subdir_file_name(),
+        "install_runtime.cmd",
+        "assemble_windows_runtime_bundle.ps1"
+    };
+
+    const boost::filesystem::path candidate_dirs[] = {
+        exe_dir,
+        exe_dir / "plugins"
+    };
+
+    for (const auto& candidate_dir : candidate_dirs) {
+        if (!boost::filesystem::exists(candidate_dir) || !boost::filesystem::is_directory(candidate_dir))
+            continue;
+
+        for (const std::string& file_name : helper_files)
+            copy_runtime_file_if_exists(candidate_dir, component_folder, file_name);
+
+        try {
+            for (auto& dir_entry : boost::filesystem::directory_iterator(candidate_dir)) {
+                if (!boost::filesystem::is_regular_file(dir_entry.path()))
+                    continue;
+                const std::string file_name = dir_entry.path().filename().string();
+                if (!Slic3r::SlicerLinuxRuntime::is_overlay_runtime_filename(file_name))
+                    continue;
+                copy_runtime_file_if_exists(candidate_dir, component_folder, file_name);
+            }
+        } catch (...) {}
+    }
+
+    const auto runtime_dst_dir = component_folder / "slicer_linux_runtime_host.runtime";
+    if (boost::filesystem::exists(runtime_dst_dir) && boost::filesystem::is_directory(runtime_dst_dir)) {
+        try {
+            boost::filesystem::remove_all(runtime_dst_dir);
+        } catch (...) {}
+    }
+}
+
+void GUI_App::copy_network_if_available()
+{
+    std::string data_dir_str = data_dir();
+    boost::filesystem::path data_dir_path(data_dir_str);
+    auto component_folder = data_dir_path / "plugins";
+    auto cache_folder = data_dir_path / "ota";
+    std::string changelog_file = cache_folder.string() + "/network_plugins.json";
+
+    if (!boost::filesystem::exists(component_folder))
+        boost::filesystem::create_directory(component_folder);
+
+    copy_local_runtime_files(component_folder);
+
+    if (app_config->get("update_network_plugin") != "true")
+        return;
+
+    std::string cached_version;
+    if (boost::filesystem::exists(changelog_file)) {
+        try {
+            boost::nowide::ifstream ifs(changelog_file);
+            json j;
+            ifs >> j;
+            if (j.contains("version"))
+                cached_version = j["version"];
+        } catch (nlohmann::detail::parse_error&) {}
+    }
+
+    const bool select_linux_component_package = Slic3r::SlicerLinuxRuntime::enabled();
+    std::string error_message;
+
+    auto copy_one = [&](const boost::filesystem::path& src, const boost::filesystem::path& dst) -> bool {
+        CopyFileResult cfr = copy_file(src.string(), dst.string(), error_message, false);
+        if (cfr != CopyFileResult::SUCCESS) {
+            BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << ": Copying failed(" << cfr << "): " << error_message;
+            return false;
+        }
+        static constexpr const auto perms = fs::owner_read | fs::owner_write | fs::group_read | fs::others_read |
+                                            fs::owner_exe | fs::group_exe | fs::others_exe;
+        try { fs::permissions(dst, perms); } catch (...) {}
+        return true;
+    };
+
+    if (select_linux_component_package) {
+        if (!boost::filesystem::exists(cache_folder)) {
+            try {
+                boost::filesystem::create_directories(cache_folder);
+            } catch (...) {
+                BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << ": failed to create Linux package cache folder: " << cache_folder.string();
+                return;
+            }
+        }
+
+        bool copy_failed = false;
+        try {
+            for (auto& dir_entry : boost::filesystem::directory_iterator(cache_folder)) {
+                const auto& path = dir_entry.path();
+                const std::string file_name = path.filename().string();
+                const std::string file_path = path.string();
+
+                if (!Slic3r::SlicerLinuxRuntime::is_overlay_runtime_filename(file_name))
+                    continue;
+
+                if (Slic3r::SlicerLinuxRuntime::is_linux_component_package_filename(file_name)) {
+                    std::string validate_reason;
+                    if (!Slic3r::SlicerLinuxRuntime::validate_linux_component_file(file_path, &validate_reason)) {
+                        BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << ": invalid cached Linux package file " << file_name << ", reason=" << validate_reason;
+                        copy_failed = true;
+                        break;
+                    }
+                } else if (path.extension() == ".so" || file_name.find(".so.") != std::string::npos) {
+                    std::string validate_reason;
+                    if (!Slic3r::SlicerLinuxRuntime::validate_linux_so_binary(file_path, &validate_reason)) {
+                        BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << ": invalid cached linux runtime file " << file_name << ", reason=" << validate_reason;
+                        copy_failed = true;
+                        break;
+                    }
+                }
+
+                if (!copy_one(path, component_folder / file_name)) {
+                    copy_failed = true;
+                    break;
+                }
+
+                try {
+                    fs::remove(path);
+                } catch (...) {}
+            }
+
+            copy_local_runtime_files(component_folder);
+        } catch (...) {
+            copy_failed = true;
+        }
+
+        if (copy_failed)
+            return;
+
+        const auto manifest = component_folder / Slic3r::SlicerLinuxRuntime::linux_component_manifest_file_name();
+        if (boost::filesystem::exists(manifest)) {
+            std::string validate_reason;
+            if (!Slic3r::SlicerLinuxRuntime::validate_linux_component_set_against_manifest(component_folder, &validate_reason)) {
+                BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << ": manifest validation failed after copy: " << validate_reason;
+                return;
+            }
+        }
+
+        if (!cached_version.empty()) {
+            app_config->set(SETTING_NETWORK_PLUGIN_VERSION, cached_version);
+            app_config->save();
+        }
+        if (boost::filesystem::exists(changelog_file))
+            fs::remove(changelog_file);
+        app_config->set("update_network_plugin", "false");
+        return;
+    }
+
+    if (cached_version.empty()) {
+        app_config->set("update_network_plugin", "false");
+        return;
+    }
+
+    std::string network_library, player_library, live555_library, network_library_dst, player_library_dst, live555_library_dst;
+#if defined(_MSC_VER) || defined(_WIN32)
+    network_library = cache_folder.string() + "/bambu_networking.dll";
+    player_library = cache_folder.string() + "/BambuSource.dll";
+    live555_library = cache_folder.string() + "/live555.dll";
+    network_library_dst = component_folder.string() + "/" + std::string(BAMBU_NETWORK_LIBRARY) + "_" + cached_version + ".dll";
+    player_library_dst = component_folder.string() + "/BambuSource.dll";
+    live555_library_dst = component_folder.string() + "/live555.dll";
+#elif defined(__WXMAC__)
+    network_library = cache_folder.string() + "/libbambu_networking.dylib";
+    player_library = cache_folder.string() + "/libBambuSource.dylib";
+    live555_library = cache_folder.string() + "/liblive555.dylib";
+    network_library_dst = component_folder.string() + "/lib" + std::string(BAMBU_NETWORK_LIBRARY) + "_" + cached_version + ".dylib";
+    player_library_dst = component_folder.string() + "/libBambuSource.dylib";
+    live555_library_dst = component_folder.string() + "/liblive555.dylib";
+#else
+    network_library = cache_folder.string() + "/libbambu_networking.so";
+    player_library = cache_folder.string() + "/libBambuSource.so";
+    live555_library = cache_folder.string() + "/liblive555.so";
+    network_library_dst = component_folder.string() + "/lib" + std::string(BAMBU_NETWORK_LIBRARY) + "_" + cached_version + ".so";
+    player_library_dst = component_folder.string() + "/libBambuSource.so";
+    live555_library_dst = component_folder.string() + "/liblive555.so";
+#endif
+
+    if (boost::filesystem::exists(network_library)) {
+        if (!copy_one(network_library, network_library_dst))
+            return;
+        fs::remove(network_library);
+        app_config->set(SETTING_NETWORK_PLUGIN_VERSION, cached_version);
+        app_config->save();
+    }
+
+    if (boost::filesystem::exists(player_library)) {
+        if (!copy_one(player_library, player_library_dst))
+            return;
+        fs::remove(player_library);
+    }
+
+    if (boost::filesystem::exists(live555_library)) {
+        if (!copy_one(live555_library, live555_library_dst))
+            return;
+        fs::remove(live555_library);
+    }
+
+    if (boost::filesystem::exists(changelog_file))
+        fs::remove(changelog_file);
+    app_config->set("update_network_plugin", "false");
 }
 
 

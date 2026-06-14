@@ -8,6 +8,9 @@ if (MSVC)
 
     add_custom_command(
         OUTPUT  ${_output}
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${DESTDIR}/include
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${DESTDIR}/lib
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${DESTDIR}/bin
         COMMAND ${CMAKE_COMMAND} -E copy ${_srcdir}/include/mpfr.h ${DESTDIR}/include/
         COMMAND ${CMAKE_COMMAND} -E copy ${_srcdir}/include/mpf2mpfr.h ${DESTDIR}/include/
         COMMAND ${CMAKE_COMMAND} -E copy ${_srcdir}/lib/win-${DEPS_ARCH}/libmpfr-4.lib ${DESTDIR}/lib/

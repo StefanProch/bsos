@@ -38,7 +38,7 @@
   </Resources>
 
   <Applications>
-    <Application Id="OrcaSlicer" Executable="orca-slicer.exe" EntryPoint="Windows.FullTrustApplication">
+    <Application Id="OrcaSlicer" Executable="bambu-studio.exe" EntryPoint="Windows.FullTrustApplication">
       <uap:VisualElements
         DisplayName="OrcaSlicer"
         Description="Open-source slicer for FDM 3D printers"

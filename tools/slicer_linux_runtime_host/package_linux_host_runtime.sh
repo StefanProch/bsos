@@ -151,6 +151,27 @@ for extra in \
     fi
 done
 
+if [[ ! -f "$RUNTIME_ROOT/ca-certificates.crt" ]]; then
+    for ca_bundle in \
+        "/etc/ssl/certs/ca-certificates.crt" \
+        "/etc/pki/tls/certs/ca-bundle.crt" \
+        "/etc/ssl/ca-bundle.pem"; do
+        if [[ -f "$ca_bundle" ]]; then
+            cp -Lf "$ca_bundle" "$RUNTIME_ROOT/ca-certificates.crt"
+            break
+        fi
+    done
+fi
+
+if [[ ! -f "$RUNTIME_ROOT/ca-certificates.crt" ]]; then
+    echo "failed to copy required CA bundle: ca-certificates.crt" >&2
+    exit 1
+fi
+if [[ ! -f "$RUNTIME_ROOT/slicer_base64.cer" ]]; then
+    echo "failed to copy required certificate: slicer_base64.cer" >&2
+    exit 1
+fi
+
 copy_runtime_libs "$HOST_ABI1" "$HOST_ABI0"
 
 touch "$RUNTIME_ROOT/.runtime_complete"

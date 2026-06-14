@@ -220,18 +220,20 @@ jobs:
       - name: Pack app
         working-directory: ${{ github.workspace }}/build
         shell: cmd
-        run: '"C:/Program Files/7-Zip/7z.exe" a -tzip OrcaSlicer_Windows_${{ env.ver }}_portable.zip ${{ github.workspace }}/build/OrcaSlicer'
+        run: '"C:/Program Files/7-Zip/7z.exe" a -tzip BambuStudio-OrcaSlicer_Windows_${{ env.ver }}_portable.zip ${{ github.workspace }}/build/OrcaSlicer'
 
       - name: Upload artifacts Win portable
         uses: actions/upload-artifact@v7
         with:
-          name: OrcaSlicer_Windows_${{ env.ver }}_portable
-          path: ${{ github.workspace }}/build/OrcaSlicer_Windows_${{ env.ver }}_portable.zip
+          name: BambuStudio-OrcaSlicer_Windows_${{ env.ver }}_portable
+          path: ${{ github.workspace }}/build/BambuStudio-OrcaSlicer_Windows_${{ env.ver }}_portable.zip
           if-no-files-found: error
 
       - name: Upload artifacts Win installer
         uses: actions/upload-artifact@v7
         with:
-          name: OrcaSlicer_Windows_${{ env.ver }}_installer
-          path: ${{ github.workspace }}/build/OrcaSlicer*.exe
+          name: BambuStudio-OrcaSlicer_Windows_${{ env.ver }}_installer
+          path: |
+            ${{ github.workspace }}/build/BambuStudio-OrcaSlicer*.exe
+            ${{ github.workspace }}/build/OrcaSlicer*.exe
           if-no-files-found: error

@@ -104,8 +104,10 @@ jobs:
 
           app_bin=""
           for candidate in \
+            "install-dir/bin/bambu-studio" \
             "install-dir/bin/OrcaSlicer" \
             "install-dir/bin/orca-slicer" \
+            "install-dir/bambu-studio" \
             "install-dir/OrcaSlicer" \
             "install-dir/orca-slicer"; do
             if [ -x "$candidate" ]; then
@@ -115,13 +117,13 @@ jobs:
           done
 
           if [ -z "$app_bin" ]; then
-            echo "ERROR: installed OrcaSlicer binary not found"
+            echo "ERROR: installed application binary not found"
             find install-dir -maxdepth 3 -type f | sort
             exit 1
           fi
 
           echo "APP_BIN=$app_bin" >> "$GITHUB_ENV"
-          tar -C install-dir -czf "out/OrcaSlicer-BMCU_LinuxDir_${DIST_ID}_amd64_${VER}.tar.gz" .
+          tar -C install-dir -czf "out/BambuStudio-OrcaSlicer_LinuxDir_${DIST_ID}_amd64_${VER}.tar.gz" .
 
       - name: Linux - build AppImage (best-effort)
         shell: bash
@@ -133,8 +135,8 @@ jobs:
 
           appimage="$(find build -maxdepth 3 -type f -name '*.AppImage' | head -n 1 || true)"
           if [ -n "$appimage" ]; then
-            mv "$appimage" "out/OrcaSlicer-BMCU_${DIST_ID}_amd64_${VER}.AppImage"
-            chmod +x "out/OrcaSlicer-BMCU_${DIST_ID}_amd64_${VER}.AppImage"
+            mv "$appimage" "out/BambuStudio-OrcaSlicer_${DIST_ID}_amd64_${VER}.AppImage"
+            chmod +x "out/BambuStudio-OrcaSlicer_${DIST_ID}_amd64_${VER}.AppImage"
           else
             echo "WARN: no AppImage produced"
           fi
@@ -147,14 +149,14 @@ jobs:
           sudo apt-get install -y dpkg-dev fakeroot binutils
 
           rm -rf pkgroot debian
-          mkdir -p pkgroot/DEBIAN pkgroot/opt/orcaslicer pkgroot/usr/bin
-          cp -a install-dir/. pkgroot/opt/orcaslicer/
+          mkdir -p pkgroot/DEBIAN pkgroot/opt/bambustudio-orcaslicer pkgroot/usr/bin
+          cp -a install-dir/. pkgroot/opt/bambustudio-orcaslicer/
 
-          cat > pkgroot/usr/bin/orca-slicer-bmcu <<EOF
+          cat > pkgroot/usr/bin/bambu-studio <<EOF
           #!/bin/sh
-          exec /opt/orcaslicer/${APP_BIN} "$@"
+          exec /opt/bambustudio-orcaslicer/${APP_BIN} "$@"
           EOF
-          chmod 0755 pkgroot/usr/bin/orca-slicer-bmcu
+          chmod 0755 pkgroot/usr/bin/bambu-studio
 
           if [[ "${EVENT_TAG:-${GITHUB_REF_NAME:-}}" == v* ]]; then
             deb_ver="${VER}~${DIST_ID}"
@@ -164,25 +166,25 @@ jobs:
 
           mkdir -p debian
           cat > debian/control <<'EOF'
-          Source: orcaslicer-bmcu
+          Source: bambustudio-orcaslicer
           Section: utils
           Priority: optional
           Maintainer: PJARCZAK CI <ci@invalid>
           Standards-Version: 4.6.2
 
-          Package: orcaslicer-bmcu
+          Package: bambustudio-orcaslicer
           Architecture: amd64
           Description: dummy control for dpkg-shlibdeps
           EOF
 
           depends=""
-          if [ -x "pkgroot/opt/orcaslicer/${APP_BIN}" ]; then
+          if [ -x "pkgroot/opt/bambustudio-orcaslicer/${APP_BIN}" ]; then
             set +e
             out="$(dpkg-shlibdeps --ignore-missing-info -O \
-              -lpkgroot/opt/orcaslicer/bin \
-              -lpkgroot/opt/orcaslicer/lib \
-              -lpkgroot/opt/orcaslicer/lib64 \
-              pkgroot/opt/orcaslicer/${APP_BIN} 2>&1)"
+              -lpkgroot/opt/bambustudio-orcaslicer/bin \
+              -lpkgroot/opt/bambustudio-orcaslicer/lib \
+              -lpkgroot/opt/bambustudio-orcaslicer/lib64 \
+              pkgroot/opt/bambustudio-orcaslicer/${APP_BIN} 2>&1)"
             rc=$?
             set -e
 
@@ -199,18 +201,18 @@ jobs:
           fi
 
           cat > pkgroot/DEBIAN/control <<EOF
-          Package: orcaslicer-bmcu
+          Package: bambustudio-orcaslicer
           Version: ${deb_ver}
           Section: utils
           Priority: optional
           Architecture: amd64
           Maintainer: PJARCZAK CI <ci@invalid>
           Depends: ${depends}
-          Description: OrcaSlicer BMCU build (installed in /opt/orcaslicer)
-           Wrapper: /usr/bin/orca-slicer-bmcu
+          Description: BambuStudio-OrcaSlicer build (installed in /opt/bambustudio-orcaslicer)
+           Wrapper: /usr/bin/bambu-studio
           EOF
 
-          fakeroot dpkg-deb --build pkgroot "out/OrcaSlicer-BMCU_${DIST_ID}_amd64_${VER}.deb"
+          fakeroot dpkg-deb --build pkgroot "out/BambuStudio-OrcaSlicer_${DIST_ID}_amd64_${VER}.deb"
 
       - name: Linux - checksums
         shell: bash
@@ -221,6 +223,6 @@ jobs:
       - name: Upload artifacts (Linux Portable ubuntu24.04)
         uses: actions/upload-artifact@v7
         with:
-          name: orcaslicer-bmcu-linux-${{ env.DIST_ID }}-${{ github.sha }}
+          name: bambustudio-orcaslicer-linux-${{ env.DIST_ID }}-${{ github.sha }}
           path: out/
           if-no-files-found: error
