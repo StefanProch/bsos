@@ -124,6 +124,10 @@ else ()
     add_executable(OrcaSlicer OrcaSlicer.cpp OrcaSlicer.hpp)
 endif ()
 
+if (APPLE)
+    set_target_properties(OrcaSlicer PROPERTIES OUTPUT_NAME "BambuStudio")
+endif ()
+
 if (MINGW)
     target_link_options(OrcaSlicer PUBLIC "-Wl,-allow-multiple-definition")
     set_target_properties(OrcaSlicer PROPERTIES PREFIX "")
@@ -318,7 +322,7 @@ else ()
     if (APPLE AND NOT CMAKE_MACOSX_BUNDLE)
         # On OSX, the name of the binary matches the name of the Application.
         add_custom_command(TARGET OrcaSlicer POST_BUILD
-            COMMAND ln -sf OrcaSlicer bambu-studio
+            COMMAND ln -sf BambuStudio bambu-studio
             WORKING_DIRECTORY "$<TARGET_FILE_DIR:OrcaSlicer>"
             VERBATIM)
     else ()
@@ -335,9 +339,9 @@ else ()
     endif ()
     if (CMAKE_MACOSX_BUNDLE)
         if (CMAKE_CONFIGURATION_TYPES)
-            set(BIN_RESOURCES_DIR "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/OrcaSlicer.app/Contents/Resources")
+            set(BIN_RESOURCES_DIR "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/BambuStudio.app/Contents/Resources")
         else()
-            set(BIN_RESOURCES_DIR "${CMAKE_CURRENT_BINARY_DIR}/OrcaSlicer.app/Contents/Resources")
+            set(BIN_RESOURCES_DIR "${CMAKE_CURRENT_BINARY_DIR}/BambuStudio.app/Contents/Resources")
         endif()
         set(MACOSX_BUNDLE_ICON_FILE Icon.icns)
         set(MACOSX_BUNDLE_BUNDLE_NAME "BambuStudio")

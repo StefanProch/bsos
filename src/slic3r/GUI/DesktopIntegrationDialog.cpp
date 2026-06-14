@@ -319,7 +319,7 @@ void DesktopIntegrationDialog::perform_desktop_integration()
         BOOST_LOG_TRIVIAL(error) << "Copying OrcaSlicer icon to icons directory failed.";
     } else 
     	// save path to icon
-        app_config->set("desktop_integration_icon_slicer_path", GUI::format("%1%/images/%2%OrcaSlicer%3%.png", target_dir_icons, icon_theme_path, version_suffix));
+        app_config->set("desktop_integration_icon_slicer_path", GUI::format("%1%/images/%2%BambuStudio%3%.png", target_dir_icons, icon_theme_path, version_suffix));
 
     // desktop file
     // iterate thru target_candidates to find applications folder
@@ -330,9 +330,9 @@ void DesktopIntegrationDialog::perform_desktop_integration()
             // Write slicer desktop file
             std::string desktop_file = GUI::format(
                 "[Desktop Entry]\n"
-                "Name=OrcaSlicer%1%\n"
+                "Name=BambuStudio%1%\n"
                 "GenericName=3D Printing Software\n"
-                "Icon=OrcaSlicer%2%\n"
+                "Icon=BambuStudio%2%\n"
                 "Exec=\"%3%\" %%F\n"
                 "Terminal=false\n"
                 "Type=Application\n"
@@ -342,11 +342,11 @@ void DesktopIntegrationDialog::perform_desktop_integration()
                 "Categories=Graphics;3DGraphics;Engineering;\n"
                 "Keywords=3D;Printing;Slicer;slice;3D;printer;convert;gcode;stl;obj;amf;SLA\n"
                 "StartupNotify=false\n"
-                "StartupWMClass=orca-slicer\n", name_suffix, version_suffix, excutable_path);
+                "StartupWMClass=bambu-studio\n", name_suffix, version_suffix, excutable_path);
 
-            std::string path = GUI::format("%1%/applications/com.orcaslicer.OrcaSlicer%2%.desktop", target_dir_desktop, version_suffix);
+            std::string path = GUI::format("%1%/applications/com.orcaslicer.BambuStudio%2%.desktop", target_dir_desktop, version_suffix);
             if (create_desktop_file(path, desktop_file)){
-                BOOST_LOG_TRIVIAL(debug) << "com.orcaslicer.OrcaSlicer.desktop file installation success.";
+                BOOST_LOG_TRIVIAL(debug) << "com.orcaslicer.BambuStudio.desktop file installation success.";
                 break;
             } else {
             	// write failed - try another path
@@ -359,7 +359,7 @@ void DesktopIntegrationDialog::perform_desktop_integration()
                 create_path(into_u8(wxFileName::GetHomeDir()), ".local/share/applications");
                 // create desktop file
                 target_dir_desktop = GUI::format("%1%/.local/share",wxFileName::GetHomeDir());
-                std::string path = GUI::format("%1%/applications/com.orcaslicer.OrcaSlicer%2%.desktop", target_dir_desktop, version_suffix);
+                std::string path = GUI::format("%1%/applications/com.orcaslicer.BambuStudio%2%.desktop", target_dir_desktop, version_suffix);
                 if (contains_path_dir(target_dir_desktop, "applications")) {
                     if (!create_desktop_file(path, desktop_file)) {    
                         // Desktop file not written - end desktop integration

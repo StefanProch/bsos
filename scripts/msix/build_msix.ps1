@@ -9,12 +9,12 @@ Requires the Windows SDK (makeappx.exe) unless -StageOnly is used.
 #>
 param(
     [string]$InstallDir = "build/OrcaSlicer",
-    [string]$OutputPath = "build/OrcaSlicer_Windows_MSIX.msix",
+    [string]$OutputPath = "build/BambuStudio_Windows_MSIX.msix",
     [string]$StagingDir = "",
     [switch]$StageOnly,
-    [string]$IdentityName = "OrcaSlicer.OrcaSlicer",
+    [string]$IdentityName = "BambuStudio.OrcaSlicer",
     [string]$Publisher = "CN=38F7EA55-C73B-4072-B3B2-C8E0EA15BB82",
-    [string]$PublisherDisplayName = "OrcaSlicer"
+    [string]$PublisherDisplayName = "PJARCZAK"
 )
 $ErrorActionPreference = 'Stop'
 

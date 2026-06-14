@@ -136,6 +136,8 @@ echo
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_BUILD_DIR="$PROJECT_DIR/build/$ARCH"
 DEPS_DIR="$PROJECT_DIR/deps"
+APP_BUNDLE_NAME="BambuStudio.app"
+LEGACY_APP_BUNDLE_NAME="OrcaSlicer.app"
 
 # For Multi-config generators like Ninja and Xcode
 export BUILD_DIR_CONFIG_SUBDIR="/$BUILD_CONFIG"
@@ -229,16 +231,20 @@ function build_slicer() {
             cd "$PROJECT_BUILD_DIR"
             mkdir -p OrcaSlicer
             cd OrcaSlicer
-            # remove previously built app
-            rm -rf ./OrcaSlicer.app
-            # fully copy newly built app
-            cp -pR "../src$BUILD_DIR_CONFIG_SUBDIR/OrcaSlicer.app" ./OrcaSlicer.app
-            # fix resources
-            resources_path=$(readlink ./OrcaSlicer.app/Contents/Resources)
-            rm ./OrcaSlicer.app/Contents/Resources
-            cp -R "$resources_path" ./OrcaSlicer.app/Contents/Resources
-            # delete .DS_Store file
-            find ./OrcaSlicer.app/ -name '.DS_Store' -delete
+            built_app="../src$BUILD_DIR_CONFIG_SUBDIR/$APP_BUNDLE_NAME"
+            if [ ! -d "$built_app" ]; then
+                built_app="../src$BUILD_DIR_CONFIG_SUBDIR/$LEGACY_APP_BUNDLE_NAME"
+            fi
+            if [ ! -d "$built_app" ]; then
+                echo "Built app bundle not found: $APP_BUNDLE_NAME or $LEGACY_APP_BUNDLE_NAME"
+                exit 1
+            fi
+            rm -rf ./$APP_BUNDLE_NAME ./$LEGACY_APP_BUNDLE_NAME
+            cp -pR "$built_app" ./$APP_BUNDLE_NAME
+            resources_path=$(readlink ./$APP_BUNDLE_NAME/Contents/Resources)
+            rm ./$APP_BUNDLE_NAME/Contents/Resources
+            cp -R "$resources_path" ./$APP_BUNDLE_NAME/Contents/Resources
+            find ./$APP_BUNDLE_NAME/ -name '.DS_Store' -delete
             
             # Copy OrcaSlicer_profile_validator.app if it exists
             if [ -f "../src$BUILD_DIR_CONFIG_SUBDIR/OrcaSlicer_profile_validator.app/Contents/MacOS/OrcaSlicer_profile_validator" ]; then
@@ -291,17 +297,17 @@ function build_universal() {
     echo "Building universal binary..."
 
     PROJECT_BUILD_DIR="$PROJECT_DIR/build/$ARCH"
-    ARM64_APP="$PROJECT_DIR/build/arm64/OrcaSlicer/OrcaSlicer.app"
-    X86_64_APP="$PROJECT_DIR/build/x86_64/OrcaSlicer/OrcaSlicer.app"
+    ARM64_APP="$PROJECT_DIR/build/arm64/OrcaSlicer/$APP_BUNDLE_NAME"
+    X86_64_APP="$PROJECT_DIR/build/x86_64/OrcaSlicer/$APP_BUNDLE_NAME"
 
     mkdir -p "$PROJECT_BUILD_DIR/OrcaSlicer"
-    UNIVERSAL_APP="$PROJECT_BUILD_DIR/OrcaSlicer/OrcaSlicer.app"
+    UNIVERSAL_APP="$PROJECT_BUILD_DIR/OrcaSlicer/$APP_BUNDLE_NAME"
     rm -rf "$UNIVERSAL_APP"
     cp -R "$ARM64_APP" "$UNIVERSAL_APP"
 
-    echo "Creating universal binaries for OrcaSlicer.app..."
+    echo "Creating universal binaries for $APP_BUNDLE_NAME..."
     lipo_dir "$UNIVERSAL_APP" "$X86_64_APP"
-    echo "Universal OrcaSlicer.app created at $UNIVERSAL_APP"
+    echo "Universal $APP_BUNDLE_NAME created at $UNIVERSAL_APP"
 
     # Create universal binary for profile validator if it exists
     ARM64_VALIDATOR="$PROJECT_DIR/build/arm64/OrcaSlicer/OrcaSlicer_profile_validator.app"

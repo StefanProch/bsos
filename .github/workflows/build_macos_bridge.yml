@@ -112,13 +112,13 @@ jobs:
       - name: Pack macOS arm64 app bundle
         shell: bash
         run: |
-          tar -czvf OrcaSlicer_Mac_bundle_arm64_${{ github.sha }}.tar.gz -C build/arm64 OrcaSlicer
+          tar -czvf BambuStudio_Mac_bundle_arm64_${{ github.sha }}.tar.gz -C build/arm64 OrcaSlicer
 
       - name: Upload macOS arm64 app bundle
         uses: actions/upload-artifact@v7
         with:
-          name: OrcaSlicer_Mac_bundle_arm64_${{ github.sha }}
-          path: ${{ github.workspace }}/OrcaSlicer_Mac_bundle_arm64_${{ github.sha }}.tar.gz
+          name: BambuStudio_Mac_bundle_arm64_${{ github.sha }}
+          path: ${{ github.workspace }}/BambuStudio_Mac_bundle_arm64_${{ github.sha }}.tar.gz
           if-no-files-found: error
 
   build_macos_x86_64:
@@ -174,13 +174,13 @@ jobs:
       - name: Pack macOS x86_64 app bundle
         shell: bash
         run: |
-          tar -czvf OrcaSlicer_Mac_bundle_x86_64_${{ github.sha }}.tar.gz -C build/x86_64 OrcaSlicer
+          tar -czvf BambuStudio_Mac_bundle_x86_64_${{ github.sha }}.tar.gz -C build/x86_64 OrcaSlicer
 
       - name: Upload macOS x86_64 app bundle
         uses: actions/upload-artifact@v7
         with:
-          name: OrcaSlicer_Mac_bundle_x86_64_${{ github.sha }}
-          path: ${{ github.workspace }}/OrcaSlicer_Mac_bundle_x86_64_${{ github.sha }}.tar.gz
+          name: BambuStudio_Mac_bundle_x86_64_${{ github.sha }}
+          path: ${{ github.workspace }}/BambuStudio_Mac_bundle_x86_64_${{ github.sha }}.tar.gz
           if-no-files-found: error
 
   build_macos_universal:
@@ -205,15 +205,15 @@ jobs:
       - name: Download macOS app bundles
         uses: actions/download-artifact@v8
         with:
-          pattern: OrcaSlicer_Mac_bundle_*_${{ github.sha }}
+          pattern: BambuStudio_Mac_bundle_*_${{ github.sha }}
           path: ${{ github.workspace }}/mac_bundles
 
       - name: Extract macOS app bundles
         shell: bash
         run: |
           mkdir -p build/arm64 build/x86_64
-          arm_bundle=$(find "$GITHUB_WORKSPACE/mac_bundles/OrcaSlicer_Mac_bundle_arm64_${{ github.sha }}" -name '*.tar.gz' -print -quit)
-          x86_bundle=$(find "$GITHUB_WORKSPACE/mac_bundles/OrcaSlicer_Mac_bundle_x86_64_${{ github.sha }}" -name '*.tar.gz' -print -quit)
+          arm_bundle=$(find "$GITHUB_WORKSPACE/mac_bundles/BambuStudio_Mac_bundle_arm64_${{ github.sha }}" -name '*.tar.gz' -print -quit)
+          x86_bundle=$(find "$GITHUB_WORKSPACE/mac_bundles/BambuStudio_Mac_bundle_x86_64_${{ github.sha }}" -name '*.tar.gz' -print -quit)
           tar -xzvf "$arm_bundle" -C "$GITHUB_WORKSPACE/build/arm64"
           tar -xzvf "$x86_bundle" -C "$GITHUB_WORKSPACE/build/x86_64"
 
@@ -225,12 +225,12 @@ jobs:
       - name: Create DMG without runtime validation
         shell: bash
         run: |
-          mkdir -p "$GITHUB_WORKSPACE/build/universal/OrcaSlicer_dmg"
-          rm -rf "$GITHUB_WORKSPACE/build/universal/OrcaSlicer_dmg"/*
-          cp -R "$GITHUB_WORKSPACE/build/universal/OrcaSlicer/OrcaSlicer.app" "$GITHUB_WORKSPACE/build/universal/OrcaSlicer_dmg/"
-          ln -sfn /Applications "$GITHUB_WORKSPACE/build/universal/OrcaSlicer_dmg/Applications"
+          mkdir -p "$GITHUB_WORKSPACE/build/universal/BambuStudio_dmg"
+          rm -rf "$GITHUB_WORKSPACE/build/universal/BambuStudio_dmg"/*
+          cp -R "$GITHUB_WORKSPACE/build/universal/OrcaSlicer/BambuStudio.app" "$GITHUB_WORKSPACE/build/universal/BambuStudio_dmg/"
+          ln -sfn /Applications "$GITHUB_WORKSPACE/build/universal/BambuStudio_dmg/Applications"
           ver=$(grep 'set(SoftFever_VERSION' version.inc | cut -d '"' -f2)
-          hdiutil create -volname "OrcaSlicer" -srcfolder "$GITHUB_WORKSPACE/build/universal/OrcaSlicer_dmg" -ov -format UDZO "OrcaSlicer_Mac_universal_V${ver}.dmg"
+          hdiutil create -volname "BambuStudio" -srcfolder "$GITHUB_WORKSPACE/build/universal/BambuStudio_dmg" -ov -format UDZO "BambuStudio_Mac_universal_V${ver}.dmg"
 
       - name: Explain skipped hosted runtime validation
         shell: bash
@@ -240,6 +240,6 @@ jobs:
       - name: Upload macOS universal DMG
         uses: actions/upload-artifact@v7
         with:
-          name: OrcaSlicer_Mac_universal_${{ github.sha }}
-          path: ${{ github.workspace }}/OrcaSlicer_Mac_universal_V*.dmg
+          name: BambuStudio_Mac_universal_${{ github.sha }}
+          path: ${{ github.workspace }}/BambuStudio_Mac_universal_V*.dmg
           if-no-files-found: error
