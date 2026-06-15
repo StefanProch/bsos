@@ -9,6 +9,14 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+trap {
+    Write-Error ("install_runtime.ps1 failed: {0}" -f $_.Exception.Message)
+    exit 1
+}
+if (Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue) {
+    $script:__slicer_runtime_prev_native_pref = $PSNativeCommandUseErrorActionPreference
+    $PSNativeCommandUseErrorActionPreference = $false
+}
 
 function Get-ScriptDir {
     if (-not [string]::IsNullOrWhiteSpace($PSScriptRoot)) {
@@ -197,6 +205,33 @@ function Invoke-NativeCapture([string]$FilePath, [string[]]$ArgumentList) {
     }
 }
 
+
+function Assert-NativeOk($Result, [string]$Action) {
+    if ($Result.ExitCode -eq 0) {
+        return
+    }
+    $text = $Result.Combined
+    if ([string]::IsNullOrWhiteSpace($text)) {
+        $text = 'no details'
+    }
+    throw ("{0} failed with exit code {1}: {2}" -f $Action, $Result.ExitCode, $text)
+}
+
+function Invoke-Wsl([string[]]$ArgumentList, [string]$Action) {
+    $result = Invoke-NativeCapture $script:wsl @ArgumentList
+    Assert-NativeOk $result $Action
+    return $result
+}
+
+function Remove-StaleInstallDir([string]$Dir) {
+    if ([string]::IsNullOrWhiteSpace($Dir)) {
+        return
+    }
+    if (Test-Path $Dir) {
+        Remove-Item -Recurse -Force $Dir
+    }
+}
+
 function Test-WslDistroExists([string]$WslPath, [string]$Name, [ref]$Reason) {
     $list = Invoke-NativeCapture $WslPath @('--list', '--quiet')
     if ($list.ExitCode -ne 0) {
@@ -264,10 +299,11 @@ if ([string]::IsNullOrWhiteSpace($InstallDir)) {
 }
 $InstallDir = [System.IO.Path]::GetFullPath($InstallDir)
 
-$wsl = Join-Path $env:WINDIR 'System32\wsl.exe'
-if (!(Test-Path $wsl)) {
+$script:wsl = Join-Path $env:WINDIR 'System32\wsl.exe'
+if (!(Test-Path $script:wsl)) {
     throw 'wsl.exe not found'
 }
+$wsl = $script:wsl
 
 if (-not $SkipCopyToComponentDir) {
     New-Item -ItemType Directory -Force -Path $ComponentDir | Out-Null
@@ -346,10 +382,13 @@ if (!(Test-Path $bootstrapPath)) {
     throw 'Missing package file: slicer_linux_runtime_wsl_run_host.sh'
 }
 
-try {
-    & $wsl --status | Out-Null
-} catch {
-    throw 'WSL is not ready. Run as Administrator once and enable Microsoft-Windows-Subsystem-Linux and VirtualMachinePlatform, then reboot.'
+$statusResult = Invoke-NativeCapture $wsl @('--status')
+if ($statusResult.ExitCode -ne 0) {
+    $statusText = $statusResult.Combined
+    if ([string]::IsNullOrWhiteSpace($statusText)) {
+        $statusText = 'no details'
+    }
+    throw ("WSL is not ready. Enable Microsoft-Windows-Subsystem-Linux and VirtualMachinePlatform, reboot, then try again. Details: {0}" -f $statusText)
 }
 
 Convert-FileToLf $bootstrapPath
@@ -369,21 +408,22 @@ if ($alreadyInstalled) {
     }
 
     if ($ReplaceExisting) {
-        & $wsl --terminate $DistroName 2>$null | Out-Null
-        & $wsl --unregister $DistroName
-        if ($LASTEXITCODE -ne 0) {
-            throw "Failed to unregister existing distro '$DistroName'"
-        }
-        $alreadyInstalled = $null
+        Invoke-NativeCapture $wsl @('--terminate', $DistroName) | Out-Null
+        $unregisterResult = Invoke-NativeCapture $wsl @('--unregister', $DistroName)
+        Assert-NativeOk $unregisterResult "wsl --unregister $DistroName"
+        $alreadyInstalled = $false
     }
 }
 
 if (-not $alreadyInstalled) {
+    Remove-StaleInstallDir $InstallDir
     New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 
-    & $wsl --import $DistroName $InstallDir $rootFsTar --version 2
-    if ($LASTEXITCODE -ne 0) {
-        throw "wsl --import failed for distro '$DistroName'"
+    Write-Host "Importing WSL runtime rootfs..."
+    $importResult = Invoke-NativeCapture $wsl @('--import', $DistroName, $InstallDir, $rootFsTar, '--version', '2')
+    Assert-NativeOk $importResult "wsl --import $DistroName"
+    if (-not [string]::IsNullOrWhiteSpace($importResult.Combined)) {
+        Write-Host $importResult.Combined
     }
 
     $wslConf = @'
@@ -404,15 +444,15 @@ WSL_EOF
 mkdir -p /root/.slicer-linux-runtime
 "@
 
-    & $wsl -d $DistroName --user root -- sh -lc $setupCmd
-    if ($LASTEXITCODE -ne 0) {
-        throw "Failed to initialize distro '$DistroName'"
+    Write-Host "Initializing WSL runtime distro..."
+    $initResult = Invoke-NativeCapture $wsl @('-d', $DistroName, '--user', 'root', '--', 'sh', '-lc', $setupCmd)
+    Assert-NativeOk $initResult "initialize WSL distro $DistroName"
+    if (-not [string]::IsNullOrWhiteSpace($initResult.Combined)) {
+        Write-Host $initResult.Combined
     }
 
-    & $wsl --terminate $DistroName
-    if ($LASTEXITCODE -ne 0) {
-        throw "Failed to terminate distro '$DistroName' after initialization"
-    }
+    $terminateResult = Invoke-NativeCapture $wsl @('--terminate', $DistroName)
+    Assert-NativeOk $terminateResult "wsl --terminate $DistroName"
 
     Write-RootFsHashMarker $InstallDir $currentRootFsHash
 } elseif ($storedRootFsHash -ne $currentRootFsHash) {
@@ -444,10 +484,14 @@ if ([string]::IsNullOrWhiteSpace($verifyShell)) {
     throw 'No PowerShell host found to run verify_runtime.ps1'
 }
 
-& $verifyShell @verifyArgs
-if ($LASTEXITCODE -ne 0) {
-    throw 'verify_runtime.ps1 failed'
+$verifyResult = Invoke-NativeCapture $verifyShell $verifyArgs
+if (-not [string]::IsNullOrWhiteSpace($verifyResult.StdOut)) {
+    Write-Host $verifyResult.StdOut
 }
+if (-not [string]::IsNullOrWhiteSpace($verifyResult.StdErr)) {
+    Write-Host $verifyResult.StdErr
+}
+Assert-NativeOk $verifyResult 'verify_runtime.ps1'
 
 Write-Host ''
 Write-Host "WSL runtime installed to: $PackageDir"

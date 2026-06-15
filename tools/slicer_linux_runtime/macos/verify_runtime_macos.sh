@@ -44,9 +44,27 @@ if [[ -z "$COMPONENT_DIR" ]]; then
     exit 2
 fi
 
+
+normalize_component_cache_dir() {
+    local dir="${1:-}"
+    if [[ -z "$dir" ]]; then
+        printf '\n'
+        return 0
+    fi
+    if [[ -d "$dir/plugins" && ! -f "$dir/libbambu_networking.so" && ! -f "$dir/libBambuSource.so" ]]; then
+        printf '%s\n' "$dir/plugins"
+    else
+        printf '%s\n' "$dir"
+    fi
+}
+
+COMPONENT_CACHE_DIR=$(normalize_component_cache_dir "$COMPONENT_CACHE_DIR")
+
 APP_SUPPORT_DIR="$HOME/Library/Application Support/BambuStudio_OrcaSlicer/slicer-linux-runtime"
 RUNTIME_DIR="${SLICER_LINUX_RUNTIME_MAC_RUNTIME_DIR:-$APP_SUPPORT_DIR/runtime}"
 LOG_DIR="$APP_SUPPORT_DIR/logs"
+INSTALL_VERSION="SLICER-LINUX-RUNTIME-MAC-0.7"
+INSTALL_VERSION_FILE="$APP_SUPPORT_DIR/install_version.txt"
 mkdir -p "$APP_SUPPORT_DIR" "$LOG_DIR"
 
 shell_quote() {
@@ -123,11 +141,46 @@ compare_copied_payload() {
     done
 }
 
+sync_payload_files_from_dir() {
+    local src_dir="$1"
+    local path base
+    if [[ -z "$src_dir" || ! -d "$src_dir" ]]; then
+        return 0
+    fi
+    for path in "$src_dir"/*; do
+        [[ -f "$path" ]] || continue
+        base=$(basename -- "$path")
+        case "$base" in
+            slicer_linux_runtime_host|slicer_linux_runtime_host_abi1|slicer_linux_runtime_host_abi0|libbambu_networking.so|libBambuSource.so|linux_component_manifest.json|ca-certificates.crt|slicer_base64.cer|ld-linux-x86-64.so.2|lib*.so|lib*.so.*|*.so|*.so.*)
+                if [[ ! -f "$RUNTIME_DIR/$base" ]] || ! cmp -s "$path" "$RUNTIME_DIR/$base"; then
+                    cp -f "$path" "$RUNTIME_DIR/$base"
+                fi
+                ;;
+        esac
+    done
+}
+
+sync_runtime_payload() {
+    mkdir -p "$RUNTIME_DIR"
+    sync_payload_files_from_dir "$COMPONENT_DIR"
+    if [[ -n "$COMPONENT_CACHE_DIR" && "$COMPONENT_CACHE_DIR" != "$COMPONENT_DIR" ]]; then
+        sync_payload_files_from_dir "$COMPONENT_CACHE_DIR"
+    fi
+    chmod 755 "$RUNTIME_DIR/slicer_linux_runtime_host" "$RUNTIME_DIR/slicer_linux_runtime_host_abi1" "$RUNTIME_DIR/slicer_linux_runtime_host_abi0" 2>/dev/null || true
+    [[ ! -f "$RUNTIME_DIR/ld-linux-x86-64.so.2" ]] || chmod 755 "$RUNTIME_DIR/ld-linux-x86-64.so.2"
+    chmod 755 "$RUNTIME_DIR"/*.so "$RUNTIME_DIR"/*.so.* 2>/dev/null || true
+}
+
 probe_linux_payload() {
     local cmd
-    cmd="export SLICER_LINUX_RUNTIME_COMPONENT_DIR=$(shell_quote "$RUNTIME_DIR"); export SLICER_LINUX_RUNTIME_COMPONENT_SO=$(shell_quote "$RUNTIME_DIR/libbambu_networking.so"); export SLICER_LINUX_RUNTIME_SOURCE_SO=$(shell_quote "$RUNTIME_DIR/libBambuSource.so"); export SLICER_LINUX_RUNTIME_MEDIA_SO=$(shell_quote "$RUNTIME_DIR/liblive555.so"); export SLICER_LINUX_RUNTIME_PROBE_LOG_DIR=$(shell_quote "$LOG_DIR"); export SLICER_LINUX_RUNTIME_COUNTRY_CODE=PL; unset LD_LIBRARY_PATH; if [ -f $(shell_quote "$RUNTIME_DIR/ca-certificates.crt") ]; then export SSL_CERT_FILE=$(shell_quote "$RUNTIME_DIR/ca-certificates.crt"); export CURL_CA_BUNDLE=$(shell_quote "$RUNTIME_DIR/ca-certificates.crt"); fi; exec $(shell_quote "$RUNTIME_DIR/slicer_linux_runtime_host") --probe-auth"
+    cmd="export SLICER_LINUX_RUNTIME_COMPONENT_DIR=$(shell_quote "$RUNTIME_DIR"); export SLICER_LINUX_RUNTIME_COMPONENT_SO=$(shell_quote "$RUNTIME_DIR/libbambu_networking.so"); export SLICER_LINUX_RUNTIME_SOURCE_SO=$(shell_quote "$RUNTIME_DIR/libBambuSource.so"); export SLICER_LINUX_RUNTIME_MEDIA_SO=$(shell_quote "$RUNTIME_DIR/liblive555.so"); export SLICER_LINUX_RUNTIME_PROBE_LOG_DIR=$(shell_quote "$LOG_DIR"); export SLICER_LINUX_RUNTIME_COUNTRY_CODE=PL; unset LD_LIBRARY_PATH; if [ -f $(shell_quote "$RUNTIME_DIR/ca-certificates.crt") ]; then export SSL_CERT_FILE=$(shell_quote "$RUNTIME_DIR/ca-certificates.crt"); export CURL_CA_BUNDLE=$(shell_quote "$RUNTIME_DIR/ca-certificates.crt"); fi; exec /bin/sh $(shell_quote "$RUNTIME_DIR/slicer_linux_runtime_host") --probe-load"
     "$LIMACTL" shell "$INSTANCE" -- /bin/sh -lc "$cmd"
 }
+
+if [[ ! -f "$INSTALL_VERSION_FILE" || "$(trim_file "$INSTALL_VERSION_FILE" || true)" != "$INSTALL_VERSION" ]]; then
+    echo "runtime version marker out of date; reinstall required" >&2
+    exit 1
+fi
 
 require_file "$COMPONENT_DIR/install_runtime_macos.sh" "install_runtime_macos.sh"
 require_file "$COMPONENT_DIR/verify_runtime_macos.sh" "verify_runtime_macos.sh"
@@ -146,22 +199,22 @@ require_file "$COMPONENT_DIR/libresolv.so.2" "libresolv.so.2"
 require_file "$COMPONENT_DIR/libnss_dns.so.2" "libnss_dns.so.2"
 require_file "$COMPONENT_DIR/libnss_files.so.2" "libnss_files.so.2"
 
+sync_runtime_payload
+
 COMPONENT_AVAILABLE=1
-if [[ ! -f "$COMPONENT_DIR/libbambu_networking.so" && ! -f "$COMPONENT_DIR/libBambuSource.so" ]]; then
+if [[ ! -f "$RUNTIME_DIR/libbambu_networking.so" && ! -f "$RUNTIME_DIR/libBambuSource.so" ]]; then
     if [[ "$ALLOW_MISSING_COMPONENT" -eq 1 ]]; then
         COMPONENT_AVAILABLE=0
     else
         echo "optional linux component not downloaded: libbambu_networking.so/libBambuSource.so" >&2
         exit 1
     fi
-elif [[ ! -f "$COMPONENT_DIR/libbambu_networking.so" || ! -f "$COMPONENT_DIR/libBambuSource.so" ]]; then
+elif [[ ! -f "$RUNTIME_DIR/libbambu_networking.so" || ! -f "$RUNTIME_DIR/libBambuSource.so" ]]; then
     echo "partial optional linux component package: libbambu_networking.so and libBambuSource.so must exist together" >&2
     exit 1
 fi
 
 if [[ "$COMPONENT_AVAILABLE" -eq 1 ]]; then
-    require_file "$COMPONENT_DIR/libbambu_networking.so" "libbambu_networking.so"
-    require_file "$COMPONENT_DIR/libBambuSource.so" "libBambuSource.so"
     require_file "$RUNTIME_DIR/libbambu_networking.so" "runtime/libbambu_networking.so"
     require_file "$RUNTIME_DIR/libBambuSource.so" "runtime/libBambuSource.so"
 fi

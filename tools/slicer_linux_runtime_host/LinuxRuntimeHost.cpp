@@ -731,6 +731,7 @@ nlohmann::json LinuxRuntimeHost::handle(const std::string& method, const nlohman
         return {{"ok", true}, {"value", 0}, {"result", refresh_agora_url_ptr_string()}};
     }
     if (method == "runtime.handshake") {
+        load_modules();
         const std::filesystem::path component_folder = std::filesystem::path(env_or("SLICER_LINUX_RUNTIME_COMPONENT_DIR", "."));
         nlohmann::json out = nlohmann::json::object();
         out["ok"] = true;
@@ -759,6 +760,7 @@ nlohmann::json LinuxRuntimeHost::handle(const std::string& method, const nlohman
         return {{"ok", true}, {"agent_count", m_agents.size()}, {"auth_capabilities", auth_capabilities()}};
     }
     if (method == "runtime.runtime_info") {
+        load_modules();
         char cwd_buf[4096] = {0};
         std::string cwd;
         if (::getcwd(cwd_buf, sizeof(cwd_buf) - 1))

@@ -14,6 +14,19 @@
 using namespace Slic3r::SlicerLinuxRuntime;
 
 namespace {
+
+int run_probe_load()
+{
+    LinuxRuntimeHost host;
+    auto hs = host.handle("runtime.handshake", nlohmann::json::object());
+    std::cerr << hs.dump() << std::endl;
+    if (!hs.value("component_loaded", false))
+        return 2;
+    if (!hs.value("source_loaded", false))
+        return 3;
+    return 0;
+}
+
 int run_probe_auth()
 {
     LinuxRuntimeHost host;
@@ -54,6 +67,9 @@ int run_probe_auth()
 int main(int argc, char** argv)
 {
     std::ios::sync_with_stdio(false);
+
+    if (argc > 1 && std::string(argv[1]) == "--probe-load")
+        return run_probe_load();
 
     if (argc > 1 && std::string(argv[1]) == "--probe-auth")
         return run_probe_auth();

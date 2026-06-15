@@ -28,13 +28,13 @@ probe_host() {
         LD_LIBRARY_PATH=$(library_path) \
         SLICER_LINUX_RUNTIME_PROBE_LOG_DIR="${SLICER_LINUX_RUNTIME_PROBE_LOG_DIR:-$DIR}" \
         SLICER_LINUX_RUNTIME_COUNTRY_CODE="${SLICER_LINUX_RUNTIME_COUNTRY_CODE:-PL}" \
-        "$LOADER" --library-path "$(library_path)" "$bin" --probe-auth >/dev/null 2>&1
+        "$LOADER" --library-path "$(library_path)" "$bin" --probe-load >/dev/null 2>&1
         return $?
     fi
     LD_LIBRARY_PATH=$(library_path) \
     SLICER_LINUX_RUNTIME_PROBE_LOG_DIR="${SLICER_LINUX_RUNTIME_PROBE_LOG_DIR:-$DIR}" \
     SLICER_LINUX_RUNTIME_COUNTRY_CODE="${SLICER_LINUX_RUNTIME_COUNTRY_CODE:-PL}" \
-    "$bin" --probe-auth >/dev/null 2>&1
+    "$bin" --probe-load >/dev/null 2>&1
 }
 
 choose_bin() {

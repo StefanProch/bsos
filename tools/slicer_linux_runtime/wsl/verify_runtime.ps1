@@ -1,6 +1,7 @@
 param(
     [string]$PackageDir = "",
     [string]$DistroName = "",
+    [string]$InstallDir = "",
     [string]$ComponentCacheDir = "",
     [switch]$AllowMissingComponent,
     [switch]$SkipProbe
@@ -88,6 +89,26 @@ function Normalize-NativeText([string]$Text) {
     return $value
 }
 
+
+function Get-FileSha256([string]$Path) {
+    return (Get-FileHash -Algorithm SHA256 -Path $Path).Hash.ToLowerInvariant()
+}
+
+function Get-RootFsHashMarkerPath([string]$Dir) {
+    return (Join-Path $Dir 'slicer-linux-runtime-rootfs-sha256.txt')
+}
+
+function Read-RootFsHashMarker([string]$Dir) {
+    if ([string]::IsNullOrWhiteSpace($Dir)) {
+        return ''
+    }
+    $path = Get-RootFsHashMarkerPath $Dir
+    if (!(Test-Path $path)) {
+        return ''
+    }
+    return ((Get-Content $path -Raw).Trim().ToLowerInvariant())
+}
+
 function Invoke-NativeCapture([string]$FilePath, [string[]]$ArgumentList) {
     $stdoutPath = [System.IO.Path]::GetTempFileName()
     $stderrPath = [System.IO.Path]::GetTempFileName()
@@ -121,6 +142,8 @@ function Test-WslDistroExists([string]$WslPath, [string]$Name) {
 
     if ($lower.Contains('there is no distribution with the supplied name') -or
         $lower.Contains('wsl_e_distribution_not_found') -or
+        $lower.Contains('wsl_e_distro_not_found') -or
+        $lower.Contains('brak dystrybucji o podanej nazwie') -or
         ($lower.Contains('distribution') -and $lower.Contains('not') -and $lower.Contains('found'))) {
         return @{
             Exists = $false
@@ -176,6 +199,11 @@ if ([string]::IsNullOrWhiteSpace($DistroName)) {
     throw 'Missing distro name. Set SLICER_LINUX_RUNTIME_WSL_DISTRO or provide slicer_linux_runtime_wsl_distro.txt.'
 }
 
+if ([string]::IsNullOrWhiteSpace($InstallDir)) {
+    $InstallDir = Join-Path $env:LOCALAPPDATA $DistroName
+}
+$InstallDir = [System.IO.Path]::GetFullPath($InstallDir)
+
 $requiredFiles = @(
     'slicer_linux_runtime.dll',
     'slicer_linux_runtime_wsl_distro.txt',
@@ -213,6 +241,17 @@ if (-not $distroStatus.Exists) {
     throw $distroStatus.Reason
 }
 
+
+$rootFsPath = Join-Path $PackageDir 'windows-wsl2-rootfs.tar'
+$expectedRootFsHash = Get-FileSha256 $rootFsPath
+$storedRootFsHash = Read-RootFsHashMarker $InstallDir
+if ([string]::IsNullOrWhiteSpace($storedRootFsHash)) {
+    throw "WSL runtime rootfs marker missing for '$DistroName'; reinstall required"
+}
+if ($storedRootFsHash -ne $expectedRootFsHash) {
+    throw "WSL runtime rootfs marker out of date for '$DistroName'; reinstall required"
+}
+
 $packageDirWsl = To-WslPath $PackageDir
 $pluginCacheDirWsl = ""
 if (-not [string]::IsNullOrWhiteSpace($ComponentCacheDir)) {
@@ -223,6 +262,7 @@ $bootstrapWsl = "$packageDirWsl/$([System.IO.Path]::GetFileName($bootstrapPath))
 Write-Host "Runtime package dir: $PackageDir"
 Write-Host "Component cache dir: $ComponentCacheDir"
 Write-Host "WSL distro: $DistroName"
+Write-Host "WSL install dir: $InstallDir"
 Write-Host "Bootstrap script: $bootstrapPath"
 
 if ($SkipProbe) {

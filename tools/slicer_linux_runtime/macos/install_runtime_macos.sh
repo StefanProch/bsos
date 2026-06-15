@@ -39,11 +39,29 @@ if [[ -z "$COMPONENT_DIR" ]]; then
     exit 2
 fi
 
+
+normalize_component_cache_dir() {
+    local dir="${1:-}"
+    if [[ -z "$dir" ]]; then
+        printf '\n'
+        return 0
+    fi
+    if [[ -d "$dir/plugins" && ! -f "$dir/libbambu_networking.so" && ! -f "$dir/libBambuSource.so" ]]; then
+        printf '%s\n' "$dir/plugins"
+    else
+        printf '%s\n' "$dir"
+    fi
+}
+
+COMPONENT_CACHE_DIR=$(normalize_component_cache_dir "$COMPONENT_CACHE_DIR")
+
 APP_SUPPORT_DIR="$HOME/Library/Application Support/BambuStudio_OrcaSlicer/slicer-linux-runtime"
 LOCAL_LIMA_ROOT="$APP_SUPPORT_DIR/lima"
 LOCAL_LIMA_BIN="$LOCAL_LIMA_ROOT/bin"
 RUNTIME_DIR="${SLICER_LINUX_RUNTIME_MAC_RUNTIME_DIR:-$APP_SUPPORT_DIR/runtime}"
 LOG_DIR="$APP_SUPPORT_DIR/logs"
+INSTALL_VERSION="SLICER-LINUX-RUNTIME-MAC-0.7"
+INSTALL_VERSION_FILE="$APP_SUPPORT_DIR/install_version.txt"
 mkdir -p "$APP_SUPPORT_DIR" "$LOCAL_LIMA_ROOT" "$RUNTIME_DIR" "$LOG_DIR"
 
 shell_quote() {
@@ -393,10 +411,40 @@ maybe_install_rosetta() {
     /usr/sbin/softwareupdate --install-rosetta --agree-to-license >/dev/null 2>&1 || true
 }
 
+check_optional_pair() {
+    local dir="$1"
+    if [[ -z "$dir" || ! -d "$dir" ]]; then
+        return 0
+    fi
+    if { [[ -f "$dir/libbambu_networking.so" ]] && [[ ! -f "$dir/libBambuSource.so" ]]; } || { [[ ! -f "$dir/libbambu_networking.so" ]] && [[ -f "$dir/libBambuSource.so" ]]; }; then
+        echo "partial optional linux component package in $dir: libbambu_networking.so and libBambuSource.so must exist together" >&2
+        exit 1
+    fi
+}
+
+copy_payload_files_from_dir() {
+    local src_dir="$1"
+    local dst_dir="$2"
+    local path base
+    if [[ -z "$src_dir" || ! -d "$src_dir" ]]; then
+        return 0
+    fi
+    for path in "$src_dir"/*; do
+        [[ -f "$path" ]] || continue
+        base=$(basename -- "$path")
+        case "$base" in
+            slicer_linux_runtime_host|slicer_linux_runtime_host_abi1|slicer_linux_runtime_host_abi0|libbambu_networking.so|libBambuSource.so|linux_component_manifest.json|ca-certificates.crt|slicer_base64.cer|ld-linux-x86-64.so.2|lib*.so|lib*.so.*|*.so|*.so.*)
+                cp -f "$path" "$dst_dir/$base"
+                ;;
+        esac
+    done
+}
+
 copy_runtime_payload() {
     local src_dir="$1"
     local dst_dir="$2"
-    local file path base
+    local cache_dir="${3:-}"
+    local file
     local required_files=(
         slicer_linux_runtime_host
         slicer_linux_runtime_host_abi1
@@ -418,26 +466,26 @@ copy_runtime_payload() {
         fi
     done
 
-    if { [[ -f "$src_dir/libbambu_networking.so" ]] && [[ ! -f "$src_dir/libBambuSource.so" ]]; } || { [[ ! -f "$src_dir/libbambu_networking.so" ]] && [[ -f "$src_dir/libBambuSource.so" ]]; }; then
-        echo "partial optional linux component package: libbambu_networking.so and libBambuSource.so must be copied together" >&2
+    check_optional_pair "$src_dir"
+    check_optional_pair "$cache_dir"
+
+    mkdir -p "$dst_dir"
+    copy_payload_files_from_dir "$src_dir" "$dst_dir"
+    if [[ -n "$cache_dir" && "$cache_dir" != "$src_dir" ]]; then
+        copy_payload_files_from_dir "$cache_dir" "$dst_dir"
+    fi
+
+    if { [[ -f "$dst_dir/libbambu_networking.so" ]] && [[ ! -f "$dst_dir/libBambuSource.so" ]]; } || { [[ ! -f "$dst_dir/libbambu_networking.so" ]] && [[ -f "$dst_dir/libBambuSource.so" ]]; }; then
+        echo "partial optional linux component package in runtime: libbambu_networking.so and libBambuSource.so must exist together" >&2
         exit 1
     fi
 
-    mkdir -p "$dst_dir"
-    for path in "$src_dir"/*; do
-        [[ -f "$path" ]] || continue
-        base=$(basename -- "$path")
-        case "$base" in
-            slicer_linux_runtime_host|slicer_linux_runtime_host_abi1|slicer_linux_runtime_host_abi0|libbambu_networking.so|libBambuSource.so|linux_component_manifest.json|ca-certificates.crt|slicer_base64.cer|ld-linux-x86-64.so.2|lib*.so|lib*.so.*|*.so|*.so.*)
-                cp -f "$path" "$dst_dir/$base"
-                ;;
-        esac
-    done
-
     chmod 755 "$dst_dir/slicer_linux_runtime_host" "$dst_dir/slicer_linux_runtime_host_abi1" "$dst_dir/slicer_linux_runtime_host_abi0"
     [[ ! -f "$dst_dir/ld-linux-x86-64.so.2" ]] || chmod 755 "$dst_dir/ld-linux-x86-64.so.2"
+    chmod 755 "$dst_dir"/*.so "$dst_dir"/*.so.* 2>/dev/null || true
     rm -f "$dst_dir/.selected_host_abi"
 }
+
 
 lima_instance_exists() {
     "$LIMACTL" list --format '{{.Name}}' 2>/dev/null | grep -Fxq "$INSTANCE"
@@ -459,10 +507,16 @@ start_lima_instance() {
 
     if lima_instance_exists; then
         "$LIMACTL" start "$INSTANCE" >/dev/null 2>&1 || true
-    else
-        if ! "$LIMACTL" "${LIMA_CREATE_ARGS[@]}" template://default; then
-            "$LIMACTL" "${LIMA_CREATE_ARGS[@]}" template:default || return 1
+        if ! "$LIMACTL" shell "$INSTANCE" -- /usr/bin/env true >/dev/null 2>&1; then
+            echo "existing Lima instance is not usable - recreating: $INSTANCE"
+            delete_lima_instance_if_exists
+        else
+            return 0
         fi
+    fi
+
+    if ! "$LIMACTL" "${LIMA_CREATE_ARGS[@]}" template:default; then
+        "$LIMACTL" "${LIMA_CREATE_ARGS[@]}" template://default || return 1
     fi
 
     "$LIMACTL" shell "$INSTANCE" -- /usr/bin/env true >/dev/null 2>&1
@@ -470,7 +524,7 @@ start_lima_instance() {
 
 probe_linux_payload() {
     local cmd
-    cmd="export SLICER_LINUX_RUNTIME_COMPONENT_DIR=$(shell_quote "$RUNTIME_DIR"); export SLICER_LINUX_RUNTIME_COMPONENT_SO=$(shell_quote "$RUNTIME_DIR/libbambu_networking.so"); export SLICER_LINUX_RUNTIME_SOURCE_SO=$(shell_quote "$RUNTIME_DIR/libBambuSource.so"); export SLICER_LINUX_RUNTIME_MEDIA_SO=$(shell_quote "$RUNTIME_DIR/liblive555.so"); export SLICER_LINUX_RUNTIME_PROBE_LOG_DIR=$(shell_quote "$LOG_DIR"); export SLICER_LINUX_RUNTIME_COUNTRY_CODE=PL; unset LD_LIBRARY_PATH; if [ -f $(shell_quote "$RUNTIME_DIR/ca-certificates.crt") ]; then export SSL_CERT_FILE=$(shell_quote "$RUNTIME_DIR/ca-certificates.crt"); export CURL_CA_BUNDLE=$(shell_quote "$RUNTIME_DIR/ca-certificates.crt"); fi; exec $(shell_quote "$RUNTIME_DIR/slicer_linux_runtime_host") --probe-auth"
+    cmd="export SLICER_LINUX_RUNTIME_COMPONENT_DIR=$(shell_quote "$RUNTIME_DIR"); export SLICER_LINUX_RUNTIME_COMPONENT_SO=$(shell_quote "$RUNTIME_DIR/libbambu_networking.so"); export SLICER_LINUX_RUNTIME_SOURCE_SO=$(shell_quote "$RUNTIME_DIR/libBambuSource.so"); export SLICER_LINUX_RUNTIME_MEDIA_SO=$(shell_quote "$RUNTIME_DIR/liblive555.so"); export SLICER_LINUX_RUNTIME_PROBE_LOG_DIR=$(shell_quote "$LOG_DIR"); export SLICER_LINUX_RUNTIME_COUNTRY_CODE=PL; unset LD_LIBRARY_PATH; if [ -f $(shell_quote "$RUNTIME_DIR/ca-certificates.crt") ]; then export SSL_CERT_FILE=$(shell_quote "$RUNTIME_DIR/ca-certificates.crt"); export CURL_CA_BUNDLE=$(shell_quote "$RUNTIME_DIR/ca-certificates.crt"); fi; exec /bin/sh $(shell_quote "$RUNTIME_DIR/slicer_linux_runtime_host") --probe-load"
     "$LIMACTL" shell "$INSTANCE" -- /bin/sh -lc "$cmd"
 }
 
@@ -518,8 +572,11 @@ try_qemu_fallback() {
     try_current_lima_mode
 }
 
-copy_runtime_payload "$COMPONENT_DIR" "$RUNTIME_DIR"
+copy_runtime_payload "$COMPONENT_DIR" "$RUNTIME_DIR" "$COMPONENT_CACHE_DIR"
 select_lima_mode
+if [[ ! -f "$INSTALL_VERSION_FILE" || "$(trim_file "$INSTALL_VERSION_FILE" || true)" != "$INSTALL_VERSION" ]]; then
+    REPLACE_EXISTING=1
+fi
 if [[ -f "$APP_SUPPORT_DIR/lima_mode.txt" && "$(trim_file "$APP_SUPPORT_DIR/lima_mode.txt" || true)" != "$LIMA_MODE" ]]; then
     REPLACE_EXISTING=1
 fi
@@ -529,18 +586,16 @@ ensure_additional_guestagents_if_needed
 maybe_install_rosetta
 
 if ! try_current_lima_mode; then
-    case "$LIMA_MODE" in
-        vz-aarch64-rosetta|vz-x86_64)
-            if ! try_qemu_fallback; then
-                echo "macOS Lima runtime probe failed; see $LOG_DIR/install-probe.log" >&2
-                exit 1
-            fi
-            ;;
-        *)
+    if [[ -n "${SLICER_LINUX_RUNTIME_MAC_ALLOW_QEMU_FALLBACK:-}" && "$LIMA_MODE" == vz-* ]]; then
+        if ! try_qemu_fallback; then
             echo "macOS Lima runtime probe failed; see $LOG_DIR/install-probe.log" >&2
             exit 1
-            ;;
-    esac
+        fi
+    else
+        echo "macOS Lima runtime probe failed; see $LOG_DIR/install-probe.log" >&2
+        exit 1
+    fi
 fi
 
+printf '%s\n' "$INSTALL_VERSION" > "$INSTALL_VERSION_FILE"
 printf 'runtime installed\n'

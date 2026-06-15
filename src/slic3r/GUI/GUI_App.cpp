@@ -2512,9 +2512,9 @@ std::string get_system_info()
     return out.str();
 }
 
-static void prepare_windows_slicer_linux_runtime(const boost::filesystem::path& component_folder,
+static bool prepare_windows_slicer_linux_runtime(const boost::filesystem::path& component_folder,
                                                 const boost::filesystem::path& component_cache_dir);
-static void prepare_macos_slicer_linux_runtime(const boost::filesystem::path& component_folder,
+static bool prepare_macos_slicer_linux_runtime(const boost::filesystem::path& component_folder,
                                               const boost::filesystem::path& component_cache_dir);
 
 bool GUI_App::on_init_inner()
@@ -2894,16 +2894,27 @@ bool GUI_App::on_init_inner()
         app_config->set(SETTING_NETWORK_PLUGIN_VERSION, get_latest_network_version());
 
     copy_network_if_available();
+    bool slicer_linux_runtime_setup_ok = true;
     if (Slic3r::SlicerLinuxRuntime::enabled()) {
         const boost::filesystem::path component_folder = boost::filesystem::path(data_dir()) / "plugins";
         const boost::filesystem::path component_cache_dir = boost::filesystem::path(data_dir()) / "ota" / "plugins";
 #ifdef WIN32
-        prepare_windows_slicer_linux_runtime(component_folder, component_cache_dir);
+        slicer_linux_runtime_setup_ok = prepare_windows_slicer_linux_runtime(component_folder, component_cache_dir);
 #elif defined(__APPLE__) || defined(__WXMAC__)
-        prepare_macos_slicer_linux_runtime(component_folder, component_cache_dir);
+        slicer_linux_runtime_setup_ok = prepare_macos_slicer_linux_runtime(component_folder, component_cache_dir);
 #endif
     }
-    on_init_network();
+    if (!slicer_linux_runtime_setup_ok && app_config) {
+        BOOST_LOG_TRIVIAL(error) << "[slicer_linux_runtime_setup] runtime setup failed or was cancelled, starting without network module";
+        const bool installed_networking = app_config->get_bool("installed_networking");
+        if (installed_networking)
+            app_config->set_bool("installed_networking", false);
+        on_init_network();
+        if (installed_networking)
+            app_config->set_bool("installed_networking", true);
+    } else {
+        on_init_network();
+    }
 
     if (m_agent && m_agent->is_user_login()) {
         enable_user_preset_folder(true);
@@ -3186,27 +3197,28 @@ static wxString runtime_command_detail(const wxArrayString& stdout_lines, const 
     return detail;
 }
 
-static void prepare_windows_slicer_linux_runtime(const boost::filesystem::path& component_folder,
+static bool prepare_windows_slicer_linux_runtime(const boost::filesystem::path& component_folder,
                                                               const boost::filesystem::path& component_cache_dir)
 {
 #ifndef WIN32
     (void)component_folder;
     (void)component_cache_dir;
+    return true;
 #else
     if (!Slic3r::SlicerLinuxRuntime::enabled())
-        return;
+        return true;
 
     const auto verify_script = component_folder / Slic3r::SlicerLinuxRuntime::windows_wsl_validate_script_file_name();
     const auto install_script = component_folder / Slic3r::SlicerLinuxRuntime::windows_wsl_import_script_file_name();
     if (!boost::filesystem::exists(verify_script) || !boost::filesystem::exists(install_script)) {
         BOOST_LOG_TRIVIAL(warning) << "[slicer_linux_runtime_setup] missing verify/install script in " << component_folder.string();
-        return;
+        return false;
     }
 
     const wxString component_dir_wx = from_u8(component_folder.string());
     const wxString cache_dir_wx = from_u8(component_cache_dir.string());
     const wxString verify_cmd = wxString::Format(
-        "powershell -NoProfile -ExecutionPolicy Bypass -File %s -PackageDir %s -ComponentCacheDir %s -AllowMissingComponent",
+        "powershell -NoProfile -ExecutionPolicy Bypass -File %s -PackageDir %s -ComponentCacheDir %s -AllowMissingComponent -SkipProbe",
         quote_windows_command_arg(from_u8(verify_script.string())),
         quote_windows_command_arg(component_dir_wx),
         quote_windows_command_arg(cache_dir_wx));
@@ -3216,7 +3228,7 @@ static void prepare_windows_slicer_linux_runtime(const boost::filesystem::path& 
     long verify_code = run_hidden_windows_command(verify_cmd, &verify_out, &verify_err);
     log_runtime_command_output("[slicer_linux_runtime_verify]", verify_code, verify_out, verify_err);
     if (verify_code == 0)
-        return;
+        return true;
 
     wxString prompt_text = _L("The Windows WSL2 Linux runtime is not ready. The application can install or repair the bundled WSL2 runtime now.");
     prompt_text += "\n\n";
@@ -3228,7 +3240,7 @@ static void prepare_windows_slicer_linux_runtime(const boost::filesystem::path& 
 
     wxMessageDialog prompt(nullptr, prompt_text, _L("BambuStudio Linux Runtime"), wxYES_NO | wxICON_QUESTION | wxCENTRE);
     if (prompt.ShowModal() != wxID_YES)
-        return;
+        return false;
 
     const wxString install_cmd = wxString::Format(
         "powershell -NoProfile -ExecutionPolicy Bypass -File %s -PackageDir %s -ComponentDir %s -ComponentCacheDir %s",
@@ -3248,37 +3260,39 @@ static void prepare_windows_slicer_linux_runtime(const boost::filesystem::path& 
         error_text += runtime_command_detail(install_out, install_err);
         wxMessageDialog error(nullptr, error_text, _L("BambuStudio Linux Runtime"), wxOK | wxICON_ERROR | wxCENTRE);
         error.ShowModal();
-        return;
+        return false;
     }
 
     verify_out.clear();
     verify_err.clear();
     verify_code = run_hidden_windows_command(verify_cmd, &verify_out, &verify_err);
     log_runtime_command_output("[slicer_linux_runtime_verify_after_install]", verify_code, verify_out, verify_err);
+    return verify_code == 0;
 #endif
 }
 
-static void prepare_macos_slicer_linux_runtime(const boost::filesystem::path& component_folder,
+static bool prepare_macos_slicer_linux_runtime(const boost::filesystem::path& component_folder,
                                                             const boost::filesystem::path& component_cache_dir)
 {
 #if !(defined(__WXMAC__) || defined(__APPLE__))
     (void)component_folder;
     (void)component_cache_dir;
+    return true;
 #else
     if (!Slic3r::SlicerLinuxRuntime::enabled())
-        return;
+        return true;
 
     const auto verify_script = component_folder / Slic3r::SlicerLinuxRuntime::mac_runtime_verify_script_file_name();
     const auto install_script = component_folder / Slic3r::SlicerLinuxRuntime::mac_runtime_install_script_file_name();
     if (!boost::filesystem::exists(verify_script) || !boost::filesystem::exists(install_script)) {
         BOOST_LOG_TRIVIAL(warning) << "[slicer_linux_runtime_setup] missing macOS verify/install script in " << component_folder.string();
-        return;
+        return false;
     }
 
     const wxString component_dir_wx = from_u8(component_folder.string());
     const wxString cache_dir_wx = from_u8(component_cache_dir.string());
     const wxString verify_cmd = wxString::Format(
-        "/bin/bash %s -PackageDir %s -ComponentDir %s -ComponentCacheDir %s -AllowMissingComponent",
+        "/bin/bash %s -PackageDir %s -ComponentDir %s -ComponentCacheDir %s -AllowMissingComponent -SkipProbe",
         quote_posix_command_arg(from_u8(verify_script.string())),
         quote_posix_command_arg(component_dir_wx),
         quote_posix_command_arg(component_dir_wx),
@@ -3289,7 +3303,7 @@ static void prepare_macos_slicer_linux_runtime(const boost::filesystem::path& co
     long verify_code = run_posix_command_sync(verify_cmd, &verify_out, &verify_err);
     log_runtime_command_output("[slicer_linux_runtime_verify_macos]", verify_code, verify_out, verify_err);
     if (verify_code == 0)
-        return;
+        return true;
 
     wxString prompt_text = _L("The macOS Linux runtime is not ready. The application can install or repair the bundled Lima runtime now.");
     prompt_text += "\n\n";
@@ -3301,7 +3315,7 @@ static void prepare_macos_slicer_linux_runtime(const boost::filesystem::path& co
 
     wxMessageDialog prompt(nullptr, prompt_text, _L("BambuStudio Linux Runtime"), wxYES_NO | wxICON_QUESTION | wxCENTRE);
     if (prompt.ShowModal() != wxID_YES)
-        return;
+        return false;
 
     const wxString install_cmd = wxString::Format(
         "/bin/bash %s -PackageDir %s -ComponentDir %s -ComponentCacheDir %s -ReplaceExisting",
@@ -3321,13 +3335,14 @@ static void prepare_macos_slicer_linux_runtime(const boost::filesystem::path& co
         error_text += runtime_command_detail(install_out, install_err);
         wxMessageDialog error(nullptr, error_text, _L("BambuStudio Linux Runtime"), wxOK | wxICON_ERROR | wxCENTRE);
         error.ShowModal();
-        return;
+        return false;
     }
 
     verify_out.clear();
     verify_err.clear();
     verify_code = run_posix_command_sync(verify_cmd, &verify_out, &verify_err);
     log_runtime_command_output("[slicer_linux_runtime_verify_after_install_macos]", verify_code, verify_out, verify_err);
+    return verify_code == 0;
 #endif
 }
 
@@ -3527,12 +3542,19 @@ void GUI_App::copy_network_if_available()
     boost::filesystem::path data_dir_path(data_dir_str);
     auto component_folder = data_dir_path / "plugins";
     auto cache_folder = data_dir_path / "ota";
-    std::string changelog_file = cache_folder.string() + "/network_plugins.json";
 
     if (!boost::filesystem::exists(component_folder))
         boost::filesystem::create_directory(component_folder);
 
     copy_local_runtime_files(component_folder);
+
+    if (Slic3r::SlicerLinuxRuntime::enabled()) {
+        const auto linux_cache_folder = cache_folder / "plugins";
+        if (boost::filesystem::exists(linux_cache_folder) && boost::filesystem::is_directory(linux_cache_folder))
+            cache_folder = linux_cache_folder;
+    }
+
+    std::string changelog_file = (cache_folder / "network_plugins.json").string();
 
     if (app_config->get("update_network_plugin") != "true")
         return;
@@ -3694,10 +3716,6 @@ void GUI_App::copy_network_if_available()
 bool GUI_App::on_init_network(bool try_backup)
 {
     const bool should_load_networking_plugin = app_config && app_config->get_bool("installed_networking");
-    const bool runtime_mode = Slic3r::SlicerLinuxRuntime::enabled();
-    const boost::filesystem::path runtime_component_folder = boost::filesystem::path(data_dir()) / "plugins";
-    std::string runtime_payload_reason;
-    const bool runtime_payload_ready = !runtime_mode || slicer_linux_runtime_ready(runtime_component_folder, &runtime_payload_reason);
     bool create_network_agent = false;
 
     const auto mark_networking_need_update = [this]() {
@@ -3725,11 +3743,30 @@ bool GUI_App::on_init_network(bool try_backup)
         app_config->save();
     }
 
-    if (should_load_networking_plugin) {
-        if (runtime_mode && !runtime_payload_ready) {
-            BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << ": skipping runtime DLL load because runtime payload is not ready, reason=" << runtime_payload_reason;
+    if (should_load_networking_plugin && Slic3r::SlicerLinuxRuntime::enabled()) {
+        const boost::filesystem::path component_folder = boost::filesystem::path(data_dir()) / "plugins";
+        const auto network_so = component_folder / Slic3r::SlicerLinuxRuntime::linux_component_library_name();
+        const auto source_so = component_folder / Slic3r::SlicerLinuxRuntime::linux_source_library_name();
+        if (!boost::filesystem::exists(network_so) || boost::filesystem::is_directory(network_so) ||
+            !boost::filesystem::exists(source_so) || boost::filesystem::is_directory(source_so)) {
+            BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << ": Linux runtime component payload incomplete, skip network module load";
             mark_networking_need_update();
-        } else if (config_version.empty()) {
+            const int result = Slic3r::NetworkAgent::unload_network_module();
+            BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": payload incomplete fallback, unload_network_module, result = " << result;
+            if (!m_device_manager)
+                m_device_manager = new Slic3r::DeviceManager();
+            else
+                m_device_manager->set_agent(nullptr);
+            if (!m_user_manager)
+                m_user_manager = new Slic3r::UserManager();
+            else
+                m_user_manager->set_agent(nullptr);
+            return true;
+        }
+    }
+
+    if (should_load_networking_plugin) {
+        if (config_version.empty()) {
             BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": no version configured, need to download";
             mark_networking_need_update();
         } else {
