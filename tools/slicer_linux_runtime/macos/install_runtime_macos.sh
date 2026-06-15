@@ -460,7 +460,9 @@ start_lima_instance() {
     if lima_instance_exists; then
         "$LIMACTL" start "$INSTANCE" >/dev/null 2>&1 || true
     else
-        "$LIMACTL" "${LIMA_CREATE_ARGS[@]}" template:default || return 1
+        if ! "$LIMACTL" "${LIMA_CREATE_ARGS[@]}" template://default; then
+            "$LIMACTL" "${LIMA_CREATE_ARGS[@]}" template:default || return 1
+        fi
     fi
 
     "$LIMACTL" shell "$INSTANCE" -- /usr/bin/env true >/dev/null 2>&1

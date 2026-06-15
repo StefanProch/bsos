@@ -6,10 +6,12 @@
 #include "../../../../shared/slicer_linux_runtime_core/RuntimeCoreJson.hpp"
 
 #include "../../GUI/Printer/BambuTunnel.h"
+#include "../FileTransferUtils.hpp"
 
 #include <atomic>
 #include <chrono>
 #include <cstring>
+#include <cstdlib>
 #include <map>
 #include <memory>
 #include <string>
@@ -27,6 +29,28 @@
 #define SLICER_LINUX_RUNTIME_EXPORT extern "C"
 #endif
 
+namespace Slic3r {
+
+struct FT_TunnelHandle {
+    std::atomic<int> refs{1};
+    std::int64_t remote{0};
+    void (*conn_cb)(void*, int, int, const char*){nullptr};
+    void* conn_user{nullptr};
+    void (*status_cb)(void*, int, int, int, const char*){nullptr};
+    void* status_user{nullptr};
+};
+
+struct FT_JobHandle {
+    std::atomic<int> refs{1};
+    std::int64_t remote{0};
+    void (*result_cb)(void*, ft_job_result){nullptr};
+    void* result_user{nullptr};
+    void (*msg_cb)(void*, ft_job_msg){nullptr};
+    void* msg_user{nullptr};
+};
+
+}
+
 namespace Slic3r::SlicerLinuxRuntime {
 
 static std::string g_last_error;
@@ -38,10 +62,12 @@ static std::string runtime_reported_version()
             g_last_error = j["error"].get<std::string>();
         return {};
     }
-    if (!j.value("component_loaded", false) || !j.value("source_loaded", false)) {
-        g_last_error = "Linux runtime host failed to load Linux package: component=" +
-            j.value("component_status", std::string("unknown")) +
-            ", source=" + j.value("source_status", std::string("unknown"));
+    const bool component_loaded = j.value("component_loaded", j.value("network_loaded", false));
+    const bool source_loaded = j.value("source_loaded", false);
+    const std::string component_status = j.value("component_status", j.value("network_status", std::string("unknown")));
+    const std::string source_status = j.value("source_status", std::string("unknown"));
+    if (!component_loaded || !source_loaded) {
+        g_last_error = "Linux runtime host failed to load Linux package: component=" + component_status + ", source=" + source_status;
         return {};
     }
     const auto actual = j.value("component_actual_abi_version", std::string());
@@ -79,6 +105,112 @@ static nlohmann::json ok_or_error(const nlohmann::json& j)
 static std::int64_t agent_id(RuntimeAgent* a)
 {
     return a ? a->remote_handle : 0;
+}
+
+static char* copy_c_string(const std::string& value)
+{
+    auto* out = static_cast<char*>(std::malloc(value.size() + 1));
+    if (!out)
+        return nullptr;
+    if (!value.empty())
+        std::memcpy(out, value.data(), value.size());
+    out[value.size()] = '\0';
+    return out;
+}
+
+static const void* copy_binary_buffer(const std::vector<unsigned char>& value)
+{
+    if (value.empty())
+        return nullptr;
+    auto* out = std::malloc(value.size());
+    if (!out)
+        return nullptr;
+    std::memcpy(out, value.data(), value.size());
+    return out;
+}
+
+static Slic3r::ft_err ft_value(const nlohmann::json& j, int fallback = -128)
+{
+    return static_cast<Slic3r::ft_err>(j.value("value", fallback));
+}
+
+static void notify_tunnel_status(Slic3r::FT_TunnelHandle* tunnel, int old_status, int new_status, int err, const char* msg)
+{
+    if (tunnel && tunnel->status_cb)
+        tunnel->status_cb(tunnel->status_user, old_status, new_status, err, msg ? msg : "");
+}
+
+static void retain_job_handle(Slic3r::FT_JobHandle* job)
+{
+    if (job)
+        job->refs.fetch_add(1, std::memory_order_relaxed);
+}
+
+static void retain_tunnel_handle(Slic3r::FT_TunnelHandle* tunnel)
+{
+    if (tunnel)
+        tunnel->refs.fetch_add(1, std::memory_order_relaxed);
+}
+
+static void release_job_handle(Slic3r::FT_JobHandle* job)
+{
+    if (!job)
+        return;
+    if (job->refs.fetch_sub(1, std::memory_order_acq_rel) == 1) {
+        RpcClient::instance().invoke_void("ft.job_release", {{"job", job->remote}});
+        delete job;
+    }
+}
+
+static void release_tunnel_handle(Slic3r::FT_TunnelHandle* tunnel)
+{
+    if (!tunnel)
+        return;
+    if (tunnel->refs.fetch_sub(1, std::memory_order_acq_rel) == 1) {
+        RpcClient::instance().invoke_void("ft.tunnel_release", {{"tunnel", tunnel->remote}});
+        delete tunnel;
+    }
+}
+
+static void poll_ft_messages(Slic3r::FT_JobHandle* job)
+{
+    retain_job_handle(job);
+    std::thread([job] {
+        for (;;) {
+            const auto j = ok_or_error(RpcClient::instance().invoke_json("ft.job_get_msg", {{"job", job->remote}, {"timeout_ms", 250U}}));
+            const auto rc = j.value("value", -128);
+            if (rc == -2)
+                break;
+            if (rc == 0 && job->msg_cb) {
+                Slic3r::ft_job_msg msg{};
+                msg.kind = j.value("kind", 0);
+                msg.json = copy_c_string(j.value("json", std::string()));
+                job->msg_cb(job->msg_user, msg);
+            }
+            if (rc != 0 && rc != -4)
+                break;
+        }
+        release_job_handle(job);
+    }).detach();
+}
+
+static void poll_ft_result(Slic3r::FT_JobHandle* job)
+{
+    retain_job_handle(job);
+    std::thread([job] {
+        const auto reply = RpcClient::instance().invoke_binary("ft.job_get_result", {{"job", job->remote}, {"timeout_ms", 0U}});
+        const auto j = ok_or_error(reply.payload);
+        if (j.value("value", -128) == 0 && job->result_cb) {
+            Slic3r::ft_job_result result{};
+            result.ec = j.value("ec", 0);
+            result.resp_ec = j.value("resp_ec", 0);
+            result.json = copy_c_string(j.value("json", std::string()));
+            result.bin = copy_binary_buffer(reply.binary);
+            result.bin_size = static_cast<uint32_t>(reply.binary.size());
+            job->result_cb(job->result_user, result);
+        }
+        release_job_handle(job);
+    }).detach();
 }
 
 static void fill_user_cache(RuntimeAgent* a, const nlohmann::json& j)
@@ -488,6 +620,219 @@ SLICER_LINUX_RUNTIME_EXPORT int bambu_network_get_mw_user_preference(void* agent
 SLICER_LINUX_RUNTIME_EXPORT int bambu_network_get_mw_user_4ulist(void* agent, int seed, int limit, std::function<void(std::string)> callback) { auto* a = require_agent(agent); return invoke_string_callback("net.get_mw_user_4ulist", a, {{"agent", agent_id(a)}, {"seed", seed}, {"limit", limit}}, callback); }
 SLICER_LINUX_RUNTIME_EXPORT int bambu_network_get_hms_snapshot(void* agent, std::string dev_id, std::string file_name, std::function<void(std::string, int)> callback) { auto* a = require_agent(agent); return invoke_string_int_callback("net.get_hms_snapshot", a, {{"agent", agent_id(a)}, {"dev_id", dev_id}, {"file_name", file_name}}, callback); }
 SLICER_LINUX_RUNTIME_EXPORT const char* bambu_network_get_last_error_msg() { return g_last_error.c_str(); }
+
+SLICER_LINUX_RUNTIME_EXPORT int ft_abi_version()
+{
+    return 1;
+}
+
+SLICER_LINUX_RUNTIME_EXPORT void ft_free(void* p)
+{
+    std::free(p);
+}
+
+SLICER_LINUX_RUNTIME_EXPORT void ft_job_result_destroy(Slic3r::ft_job_result* result)
+{
+    if (!result)
+        return;
+    std::free(const_cast<char*>(result->json));
+    std::free(const_cast<void*>(result->bin));
+    result->ec = 0;
+    result->resp_ec = 0;
+    result->json = nullptr;
+    result->bin = nullptr;
+    result->bin_size = 0;
+}
+
+SLICER_LINUX_RUNTIME_EXPORT void ft_job_msg_destroy(Slic3r::ft_job_msg* msg)
+{
+    if (!msg)
+        return;
+    std::free(const_cast<char*>(msg->json));
+    msg->kind = 0;
+    msg->json = nullptr;
+}
+
+SLICER_LINUX_RUNTIME_EXPORT Slic3r::ft_err ft_tunnel_create(const char* url, Slic3r::FT_TunnelHandle** out)
+{
+    if (!out)
+        return Slic3r::FT_EINVAL;
+    *out = nullptr;
+    const auto j = ok_or_error(RpcClient::instance().invoke_json("ft.tunnel_create", {{"url", std::string(url ? url : "")}}));
+    const auto ret = ft_value(j);
+    const auto remote = j.value("tunnel", 0LL);
+    if (ret != Slic3r::FT_OK || remote == 0)
+        return ret;
+    auto* tunnel = new Slic3r::FT_TunnelHandle();
+    tunnel->remote = remote;
+    *out = tunnel;
+    return Slic3r::FT_OK;
+}
+
+SLICER_LINUX_RUNTIME_EXPORT void ft_tunnel_retain(Slic3r::FT_TunnelHandle* tunnel)
+{
+    retain_tunnel_handle(tunnel);
+}
+
+SLICER_LINUX_RUNTIME_EXPORT void ft_tunnel_release(Slic3r::FT_TunnelHandle* tunnel)
+{
+    release_tunnel_handle(tunnel);
+}
+
+SLICER_LINUX_RUNTIME_EXPORT Slic3r::ft_err ft_tunnel_sync_connect(Slic3r::FT_TunnelHandle* tunnel);
+
+SLICER_LINUX_RUNTIME_EXPORT Slic3r::ft_err ft_tunnel_start_connect(Slic3r::FT_TunnelHandle* tunnel, void (*cb)(void*, int, int, const char*), void* user)
+{
+    if (!tunnel)
+        return Slic3r::FT_EINVAL;
+    tunnel->conn_cb = cb;
+    tunnel->conn_user = user;
+    const auto ret = ft_tunnel_sync_connect(tunnel);
+    if (cb)
+        cb(user, ret == Slic3r::FT_OK ? 0 : 1, static_cast<int>(ret), ret == Slic3r::FT_OK ? "" : g_last_error.c_str());
+    return ret;
+}
+
+SLICER_LINUX_RUNTIME_EXPORT Slic3r::ft_err ft_tunnel_sync_connect(Slic3r::FT_TunnelHandle* tunnel)
+{
+    if (!tunnel)
+        return Slic3r::FT_EINVAL;
+    notify_tunnel_status(tunnel, 0, 1, 0, "connecting");
+    const auto j = ok_or_error(RpcClient::instance().invoke_json("ft.tunnel_sync_connect", {{"tunnel", tunnel->remote}}));
+    const auto ret = ft_value(j);
+    notify_tunnel_status(tunnel, 1, ret == Slic3r::FT_OK ? 2 : -1, static_cast<int>(ret), ret == Slic3r::FT_OK ? "connected" : g_last_error.c_str());
+    return ret;
+}
+
+SLICER_LINUX_RUNTIME_EXPORT Slic3r::ft_err ft_tunnel_set_status_cb(Slic3r::FT_TunnelHandle* tunnel, void (*cb)(void*, int, int, int, const char*), void* user)
+{
+    if (!tunnel)
+        return Slic3r::FT_EINVAL;
+    tunnel->status_cb = cb;
+    tunnel->status_user = user;
+    return Slic3r::FT_OK;
+}
+
+SLICER_LINUX_RUNTIME_EXPORT Slic3r::ft_err ft_tunnel_shutdown(Slic3r::FT_TunnelHandle* tunnel)
+{
+    if (!tunnel)
+        return Slic3r::FT_EINVAL;
+    const auto j = ok_or_error(RpcClient::instance().invoke_json("ft.tunnel_shutdown", {{"tunnel", tunnel->remote}}));
+    return ft_value(j);
+}
+
+SLICER_LINUX_RUNTIME_EXPORT Slic3r::ft_err ft_job_create(const char* params_json, Slic3r::FT_JobHandle** out)
+{
+    if (!out)
+        return Slic3r::FT_EINVAL;
+    *out = nullptr;
+    const auto j = ok_or_error(RpcClient::instance().invoke_json("ft.job_create", {{"params_json", std::string(params_json ? params_json : "")}}));
+    const auto ret = ft_value(j);
+    const auto remote = j.value("job", 0LL);
+    if (ret != Slic3r::FT_OK || remote == 0)
+        return ret;
+    auto* job = new Slic3r::FT_JobHandle();
+    job->remote = remote;
+    *out = job;
+    return Slic3r::FT_OK;
+}
+
+SLICER_LINUX_RUNTIME_EXPORT void ft_job_retain(Slic3r::FT_JobHandle* job)
+{
+    retain_job_handle(job);
+}
+
+SLICER_LINUX_RUNTIME_EXPORT void ft_job_release(Slic3r::FT_JobHandle* job)
+{
+    release_job_handle(job);
+}
+
+SLICER_LINUX_RUNTIME_EXPORT Slic3r::ft_err ft_job_set_result_cb(Slic3r::FT_JobHandle* job, void (*cb)(void*, Slic3r::ft_job_result), void* user)
+{
+    if (!job)
+        return Slic3r::FT_EINVAL;
+    job->result_cb = cb;
+    job->result_user = user;
+    return Slic3r::FT_OK;
+}
+
+SLICER_LINUX_RUNTIME_EXPORT Slic3r::ft_err ft_job_get_result(Slic3r::FT_JobHandle* job, uint32_t timeout_ms, Slic3r::ft_job_result* out_result)
+{
+    if (!job || !out_result)
+        return Slic3r::FT_EINVAL;
+    *out_result = {};
+    const auto reply = RpcClient::instance().invoke_binary("ft.job_get_result", {{"job", job->remote}, {"timeout_ms", timeout_ms}});
+    const auto j = ok_or_error(reply.payload);
+    const auto ret = ft_value(j);
+    if (ret != Slic3r::FT_OK)
+        return ret;
+    out_result->ec = j.value("ec", 0);
+    out_result->resp_ec = j.value("resp_ec", 0);
+    out_result->json = copy_c_string(j.value("json", std::string()));
+    out_result->bin = copy_binary_buffer(reply.binary);
+    out_result->bin_size = static_cast<uint32_t>(reply.binary.size());
+    return Slic3r::FT_OK;
+}
+
+SLICER_LINUX_RUNTIME_EXPORT Slic3r::ft_err ft_tunnel_start_job(Slic3r::FT_TunnelHandle* tunnel, Slic3r::FT_JobHandle* job)
+{
+    if (!tunnel || !job)
+        return Slic3r::FT_EINVAL;
+    const auto j = ok_or_error(RpcClient::instance().invoke_json("ft.job_start", {{"tunnel", tunnel->remote}, {"job", job->remote}}));
+    const auto ret = ft_value(j);
+    if (ret == Slic3r::FT_OK) {
+        if (job->msg_cb)
+            poll_ft_messages(job);
+        if (job->result_cb)
+            poll_ft_result(job);
+    }
+    return ret;
+}
+
+SLICER_LINUX_RUNTIME_EXPORT Slic3r::ft_err ft_job_cancel(Slic3r::FT_JobHandle* job)
+{
+    if (!job)
+        return Slic3r::FT_EINVAL;
+    const auto j = ok_or_error(RpcClient::instance().invoke_json("ft.job_cancel", {{"job", job->remote}}));
+    return ft_value(j);
+}
+
+SLICER_LINUX_RUNTIME_EXPORT Slic3r::ft_err ft_job_set_msg_cb(Slic3r::FT_JobHandle* job, void (*cb)(void*, Slic3r::ft_job_msg), void* user)
+{
+    if (!job)
+        return Slic3r::FT_EINVAL;
+    job->msg_cb = cb;
+    job->msg_user = user;
+    return Slic3r::FT_OK;
+}
+
+SLICER_LINUX_RUNTIME_EXPORT Slic3r::ft_err ft_job_try_get_msg(Slic3r::FT_JobHandle* job, Slic3r::ft_job_msg* out_msg)
+{
+    if (!job || !out_msg)
+        return Slic3r::FT_EINVAL;
+    *out_msg = {};
+    const auto j = ok_or_error(RpcClient::instance().invoke_json("ft.job_try_get_msg", {{"job", job->remote}}));
+    const auto ret = ft_value(j);
+    if (ret != Slic3r::FT_OK)
+        return ret;
+    out_msg->kind = j.value("kind", 0);
+    out_msg->json = copy_c_string(j.value("json", std::string()));
+    return Slic3r::FT_OK;
+}
+
+SLICER_LINUX_RUNTIME_EXPORT Slic3r::ft_err ft_job_get_msg(Slic3r::FT_JobHandle* job, uint32_t timeout_ms, Slic3r::ft_job_msg* out_msg)
+{
+    if (!job || !out_msg)
+        return Slic3r::FT_EINVAL;
+    *out_msg = {};
+    const auto j = ok_or_error(RpcClient::instance().invoke_json("ft.job_get_msg", {{"job", job->remote}, {"timeout_ms", timeout_ms}}));
+    const auto ret = ft_value(j);
+    if (ret != Slic3r::FT_OK)
+        return ret;
+    out_msg->kind = j.value("kind", 0);
+    out_msg->json = copy_c_string(j.value("json", std::string()));
+    return Slic3r::FT_OK;
+}
 
 SLICER_LINUX_RUNTIME_EXPORT int Bambu_Create(Bambu_Tunnel* tunnel, char const* path)
 {

@@ -245,8 +245,32 @@ function build_slicer() {
             rm ./$APP_BUNDLE_NAME/Contents/Resources
             cp -R "$resources_path" ./$APP_BUNDLE_NAME/Contents/Resources
 
-            runtime_src="../src$BUILD_DIR_CONFIG_SUBDIR"
             runtime_dst="./$APP_BUNDLE_NAME/Contents/MacOS/plugins"
+            runtime_marker=""
+            runtime_candidates=(
+                "../src/slic3r/Utils/SlicerLinuxRuntime$BUILD_DIR_CONFIG_SUBDIR/libslicer_linux_runtime.dylib"
+                "../src/slic3r/Utils/SlicerLinuxRuntime/$BUILD_CONFIG/libslicer_linux_runtime.dylib"
+                "../src$BUILD_DIR_CONFIG_SUBDIR/libslicer_linux_runtime.dylib"
+            )
+            for candidate in "${runtime_candidates[@]}"; do
+                if [ -f "$candidate" ]; then
+                    runtime_marker="$candidate"
+                    break
+                fi
+            done
+            if [ -z "$runtime_marker" ]; then
+                runtime_marker=$(find ../src -path "*/SlicerLinuxRuntime/*/libslicer_linux_runtime.dylib" -type f -print -quit)
+            fi
+            if [ -z "$runtime_marker" ]; then
+                runtime_marker=$(find ../src -name "libslicer_linux_runtime.dylib" -type f -print -quit)
+            fi
+            if [ -z "$runtime_marker" ]; then
+                echo "Missing macOS Linux runtime library: libslicer_linux_runtime.dylib"
+                find ../src -maxdepth 8 -name "libslicer_linux_runtime.dylib" -print || true
+                exit 1
+            fi
+            runtime_src=$(cd "$(dirname "$runtime_marker")" && pwd)
+            echo "macOS Linux runtime package source: $runtime_src"
             runtime_required=(
                 "libslicer_linux_runtime.dylib"
                 "slicer-linux-runtime-host-wrapper"

@@ -166,12 +166,15 @@ bool RpcClient::ensure_handshake()
         return false;
     }
 
-    if (!reply.payload.value("network_loaded", false) || !reply.payload.value("source_loaded", false)) {
+    const bool component_loaded = reply.payload.value("component_loaded", reply.payload.value("network_loaded", false));
+    const bool source_loaded = reply.payload.value("source_loaded", false);
+    const std::string component_status = reply.payload.value("component_status", reply.payload.value("network_status", std::string("unknown")));
+    const std::string source_status = reply.payload.value("source_status", std::string("unknown"));
+
+    if (!component_loaded || !source_loaded) {
         {
             std::lock_guard<std::mutex> lock(m_state_mutex);
-            m_last_error = "Linux runtime host failed to load Linux package: network=" +
-                reply.payload.value("network_status", std::string("unknown")) +
-                ", source=" + reply.payload.value("source_status", std::string("unknown"));
+            m_last_error = "Linux runtime host failed to load Linux package: component=" + component_status + ", source=" + source_status;
         }
         stop();
         return false;

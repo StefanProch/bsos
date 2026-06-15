@@ -590,6 +590,7 @@ nlohmann::json LinuxRuntimeHost::auth_capabilities() const
     auto self = const_cast<LinuxRuntimeHost*>(this);
     return {
         {"component_loaded", self->m_component != nullptr},
+        {"network_loaded", self->m_component != nullptr},
         {"source_loaded", self->m_source != nullptr},
         {"bambu_network_is_user_login", self->has_component_symbol("bambu_network_is_user_login")},
         {"bambu_network_get_user_id", self->has_component_symbol("bambu_network_get_user_id")},
@@ -737,14 +738,18 @@ nlohmann::json LinuxRuntimeHost::handle(const std::string& method, const nlohman
         out["runtime_version"] = "SLICER-LINUX-RUNTIME-0.6";
         out["component_abi_version"] = expected_component_abi_version();
         out["component_actual_abi_version"] = m_component_actual_abi_version;
+        out["network_abi_version"] = expected_component_abi_version();
+        out["network_actual_abi_version"] = m_component_actual_abi_version;
         out["guest_arch"] = host_arch_string();
         out["component_dir"] = component_folder.string();
         out["component_so_present"] = path_exists(component_folder / linux_component_library_name());
         out["source_so_present"] = path_exists(component_folder / linux_source_library_name());
         out["manifest_present"] = path_exists(component_folder / linux_component_manifest_file_name());
         out["component_loaded"] = m_component != nullptr;
+        out["network_loaded"] = m_component != nullptr;
         out["source_loaded"] = m_source != nullptr;
         out["component_status"] = m_component_status;
+        out["network_status"] = m_component_status;
         out["source_status"] = m_source_status;
         out["auth_capabilities"] = auth_capabilities();
         out["agent_count"] = m_agents.size();
@@ -770,8 +775,10 @@ nlohmann::json LinuxRuntimeHost::handle(const std::string& method, const nlohman
         out["curl_ca_bundle"] = env_or("CURL_CA_BUNDLE", "");
         out["ld_library_path"] = env_or("LD_LIBRARY_PATH", "");
         out["component_loaded"] = m_component != nullptr;
+        out["network_loaded"] = m_component != nullptr;
         out["source_loaded"] = m_source != nullptr;
         out["component_status"] = m_component_status;
+        out["network_status"] = m_component_status;
         out["source_status"] = m_source_status;
         host_log_json("runtime.runtime_info", out);
         return out;

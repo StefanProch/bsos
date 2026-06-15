@@ -3165,6 +3165,27 @@ static void log_runtime_command_output(const char* tag, long exit_code, const wx
         BOOST_LOG_TRIVIAL(error) << tag << " [stderr] " << into_u8(line);
 }
 
+static wxString runtime_command_detail(const wxArrayString& stdout_lines, const wxArrayString& stderr_lines)
+{
+    wxString detail;
+    auto append = [&detail](const wxArrayString& lines) {
+        for (const auto& line : lines) {
+            if (!detail.empty())
+                detail += "\n";
+            detail += line;
+        }
+    };
+    append(stderr_lines);
+    append(stdout_lines);
+    if (detail.empty())
+        detail = _L("no details");
+    if (detail.length() > 1800) {
+        detail.Truncate(1800);
+        detail += "\n...";
+    }
+    return detail;
+}
+
 static void prepare_windows_slicer_linux_runtime(const boost::filesystem::path& component_folder,
                                                               const boost::filesystem::path& component_cache_dir)
 {
@@ -3197,6 +3218,18 @@ static void prepare_windows_slicer_linux_runtime(const boost::filesystem::path& 
     if (verify_code == 0)
         return;
 
+    wxString prompt_text = _L("The Windows WSL2 Linux runtime is not ready. The application can install or repair the bundled WSL2 runtime now.");
+    prompt_text += "\n\n";
+    prompt_text += _L("Details:");
+    prompt_text += "\n";
+    prompt_text += runtime_command_detail(verify_out, verify_err);
+    prompt_text += "\n\n";
+    prompt_text += _L("Install or repair it now?");
+
+    wxMessageDialog prompt(nullptr, prompt_text, _L("BambuStudio Linux Runtime"), wxYES_NO | wxICON_QUESTION | wxCENTRE);
+    if (prompt.ShowModal() != wxID_YES)
+        return;
+
     const wxString install_cmd = wxString::Format(
         "powershell -NoProfile -ExecutionPolicy Bypass -File %s -PackageDir %s -ComponentDir %s -ComponentCacheDir %s",
         quote_windows_command_arg(from_u8(install_script.string())),
@@ -3208,6 +3241,15 @@ static void prepare_windows_slicer_linux_runtime(const boost::filesystem::path& 
     wxArrayString install_err;
     long install_code = run_hidden_windows_command(install_cmd, &install_out, &install_err);
     log_runtime_command_output("[slicer_linux_runtime_install]", install_code, install_out, install_err);
+
+    if (install_code != 0) {
+        wxString error_text = _L("Windows WSL2 Linux runtime installation failed.");
+        error_text += "\n\n";
+        error_text += runtime_command_detail(install_out, install_err);
+        wxMessageDialog error(nullptr, error_text, _L("BambuStudio Linux Runtime"), wxOK | wxICON_ERROR | wxCENTRE);
+        error.ShowModal();
+        return;
+    }
 
     verify_out.clear();
     verify_err.clear();
@@ -3249,11 +3291,15 @@ static void prepare_macos_slicer_linux_runtime(const boost::filesystem::path& co
     if (verify_code == 0)
         return;
 
-    wxMessageDialog prompt(
-        nullptr,
-        _L("The macOS Linux runtime is not ready. The application can install or repair the bundled Lima runtime now."),
-        _L("OrcaSlicer Slicer Linux Runtime"),
-        wxYES_NO | wxICON_QUESTION | wxCENTRE);
+    wxString prompt_text = _L("The macOS Linux runtime is not ready. The application can install or repair the bundled Lima runtime now.");
+    prompt_text += "\n\n";
+    prompt_text += _L("Details:");
+    prompt_text += "\n";
+    prompt_text += runtime_command_detail(verify_out, verify_err);
+    prompt_text += "\n\n";
+    prompt_text += _L("Install or repair it now?");
+
+    wxMessageDialog prompt(nullptr, prompt_text, _L("BambuStudio Linux Runtime"), wxYES_NO | wxICON_QUESTION | wxCENTRE);
     if (prompt.ShowModal() != wxID_YES)
         return;
 
@@ -3268,6 +3314,15 @@ static void prepare_macos_slicer_linux_runtime(const boost::filesystem::path& co
     wxArrayString install_err;
     long install_code = run_posix_command_sync(install_cmd, &install_out, &install_err);
     log_runtime_command_output("[slicer_linux_runtime_install_macos]", install_code, install_out, install_err);
+
+    if (install_code != 0) {
+        wxString error_text = _L("macOS Linux runtime installation failed.");
+        error_text += "\n\n";
+        error_text += runtime_command_detail(install_out, install_err);
+        wxMessageDialog error(nullptr, error_text, _L("BambuStudio Linux Runtime"), wxOK | wxICON_ERROR | wxCENTRE);
+        error.ShowModal();
+        return;
+    }
 
     verify_out.clear();
     verify_err.clear();
@@ -3639,6 +3694,10 @@ void GUI_App::copy_network_if_available()
 bool GUI_App::on_init_network(bool try_backup)
 {
     const bool should_load_networking_plugin = app_config && app_config->get_bool("installed_networking");
+    const bool runtime_mode = Slic3r::SlicerLinuxRuntime::enabled();
+    const boost::filesystem::path runtime_component_folder = boost::filesystem::path(data_dir()) / "plugins";
+    std::string runtime_payload_reason;
+    const bool runtime_payload_ready = !runtime_mode || slicer_linux_runtime_ready(runtime_component_folder, &runtime_payload_reason);
     bool create_network_agent = false;
 
     const auto mark_networking_need_update = [this]() {
@@ -3667,7 +3726,10 @@ bool GUI_App::on_init_network(bool try_backup)
     }
 
     if (should_load_networking_plugin) {
-        if (config_version.empty()) {
+        if (runtime_mode && !runtime_payload_ready) {
+            BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << ": skipping runtime DLL load because runtime payload is not ready, reason=" << runtime_payload_reason;
+            mark_networking_need_update();
+        } else if (config_version.empty()) {
             BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": no version configured, need to download";
             mark_networking_need_update();
         } else {
