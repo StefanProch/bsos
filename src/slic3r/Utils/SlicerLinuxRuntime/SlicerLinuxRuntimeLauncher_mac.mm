@@ -131,8 +131,6 @@ std::string first_missing_runtime_file(const std::filesystem::path& component_di
         host_executable_file_name(),
         std::string("slicer_linux_runtime_host_abi1"),
         std::string("slicer_linux_runtime_host_abi0"),
-        linux_component_library_name(),
-        linux_source_library_name(),
         std::string("ca-certificates.crt"),
         std::string("slicer_base64.cer"),
         std::string("ld-linux-x86-64.so.2"),
@@ -145,6 +143,17 @@ std::string first_missing_runtime_file(const std::filesystem::path& component_di
 
     for (const std::string& name : runtime_required_files) {
         if (!std::filesystem::exists(runtime_dir_path / std::filesystem::path(name)))
+            return name;
+    }
+
+    const std::string component_required_files[] = {
+        linux_component_library_name(),
+        linux_source_library_name()
+    };
+
+    for (const std::string& name : component_required_files) {
+        if (!std::filesystem::exists(component_dir / std::filesystem::path(name)) &&
+            !std::filesystem::exists(runtime_dir_path / std::filesystem::path(name)))
             return name;
     }
 

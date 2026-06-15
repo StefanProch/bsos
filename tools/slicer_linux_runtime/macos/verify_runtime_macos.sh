@@ -134,23 +134,6 @@ require_file "$COMPONENT_DIR/verify_runtime_macos.sh" "verify_runtime_macos.sh"
 require_file "$COMPONENT_DIR/slicer_linux_runtime_lima_instance.txt" "slicer_linux_runtime_lima_instance.txt"
 require_file "$COMPONENT_DIR/slicer-linux-runtime-host-wrapper" "slicer-linux-runtime-host-wrapper"
 require_file "$COMPONENT_DIR/libslicer_linux_runtime.dylib" "libslicer_linux_runtime.dylib"
-
-if [[ ! -f "$COMPONENT_DIR/libbambu_networking.so" && ! -f "$COMPONENT_DIR/libBambuSource.so" ]]; then
-    if [[ "$ALLOW_MISSING_COMPONENT" -eq 1 ]]; then
-        echo "macOS runtime package OK, optional linux component not downloaded yet."
-        exit 0
-    fi
-    echo "optional linux component not downloaded: libbambu_networking.so/libBambuSource.so" >&2
-    exit 1
-fi
-
-if [[ ! -f "$COMPONENT_DIR/libbambu_networking.so" || ! -f "$COMPONENT_DIR/libBambuSource.so" ]]; then
-    echo "partial optional linux component package: libbambu_networking.so and libBambuSource.so must exist together" >&2
-    exit 1
-fi
-
-require_file "$COMPONENT_DIR/libbambu_networking.so" "libbambu_networking.so"
-require_file "$COMPONENT_DIR/libBambuSource.so" "libBambuSource.so"
 require_file "$COMPONENT_DIR/slicer_linux_runtime_host" "slicer_linux_runtime_host"
 require_file "$COMPONENT_DIR/slicer_linux_runtime_host_abi1" "slicer_linux_runtime_host_abi1"
 require_file "$COMPONENT_DIR/slicer_linux_runtime_host_abi0" "slicer_linux_runtime_host_abi0"
@@ -163,8 +146,26 @@ require_file "$COMPONENT_DIR/libresolv.so.2" "libresolv.so.2"
 require_file "$COMPONENT_DIR/libnss_dns.so.2" "libnss_dns.so.2"
 require_file "$COMPONENT_DIR/libnss_files.so.2" "libnss_files.so.2"
 
-require_file "$RUNTIME_DIR/libbambu_networking.so" "runtime/libbambu_networking.so"
-require_file "$RUNTIME_DIR/libBambuSource.so" "runtime/libBambuSource.so"
+COMPONENT_AVAILABLE=1
+if [[ ! -f "$COMPONENT_DIR/libbambu_networking.so" && ! -f "$COMPONENT_DIR/libBambuSource.so" ]]; then
+    if [[ "$ALLOW_MISSING_COMPONENT" -eq 1 ]]; then
+        COMPONENT_AVAILABLE=0
+    else
+        echo "optional linux component not downloaded: libbambu_networking.so/libBambuSource.so" >&2
+        exit 1
+    fi
+elif [[ ! -f "$COMPONENT_DIR/libbambu_networking.so" || ! -f "$COMPONENT_DIR/libBambuSource.so" ]]; then
+    echo "partial optional linux component package: libbambu_networking.so and libBambuSource.so must exist together" >&2
+    exit 1
+fi
+
+if [[ "$COMPONENT_AVAILABLE" -eq 1 ]]; then
+    require_file "$COMPONENT_DIR/libbambu_networking.so" "libbambu_networking.so"
+    require_file "$COMPONENT_DIR/libBambuSource.so" "libBambuSource.so"
+    require_file "$RUNTIME_DIR/libbambu_networking.so" "runtime/libbambu_networking.so"
+    require_file "$RUNTIME_DIR/libBambuSource.so" "runtime/libBambuSource.so"
+fi
+
 require_file "$RUNTIME_DIR/slicer_linux_runtime_host" "runtime/slicer_linux_runtime_host"
 require_file "$RUNTIME_DIR/slicer_linux_runtime_host_abi1" "runtime/slicer_linux_runtime_host_abi1"
 require_file "$RUNTIME_DIR/slicer_linux_runtime_host_abi0" "runtime/slicer_linux_runtime_host_abi0"
@@ -199,12 +200,14 @@ if ! "$LIMACTL" shell "$INSTANCE" -- /usr/bin/env true >/dev/null 2>&1; then
     exit 1
 fi
 
-if [[ "$SKIP_PROBE" -eq 0 ]]; then
+if [[ "$SKIP_PROBE" -eq 0 && "$COMPONENT_AVAILABLE" -eq 1 ]]; then
     if ! probe_linux_payload >> "$LOG_DIR/verify-probe.log" 2>&1; then
         echo "macOS Lima runtime probe failed" >&2
         echo "log: $LOG_DIR/verify-probe.log" >&2
         exit 1
     fi
+elif [[ "$COMPONENT_AVAILABLE" -eq 0 ]]; then
+    echo "optional linux component not present; Lima runtime verified without plugin probe"
 fi
 
 printf 'runtime ok\n'

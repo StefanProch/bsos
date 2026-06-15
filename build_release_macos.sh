@@ -244,6 +244,45 @@ function build_slicer() {
             resources_path=$(readlink ./$APP_BUNDLE_NAME/Contents/Resources)
             rm ./$APP_BUNDLE_NAME/Contents/Resources
             cp -R "$resources_path" ./$APP_BUNDLE_NAME/Contents/Resources
+
+            runtime_src="../src$BUILD_DIR_CONFIG_SUBDIR"
+            runtime_dst="./$APP_BUNDLE_NAME/Contents/MacOS/plugins"
+            runtime_required=(
+                "libslicer_linux_runtime.dylib"
+                "slicer-linux-runtime-host-wrapper"
+                "install_runtime_macos.sh"
+                "verify_runtime_macos.sh"
+                "slicer_linux_runtime_lima_instance.txt"
+                "slicer_linux_runtime_host"
+                "slicer_linux_runtime_host_abi1"
+                "slicer_linux_runtime_host_abi0"
+                "ca-certificates.crt"
+                "slicer_base64.cer"
+                "ld-linux-x86-64.so.2"
+                "libc.so.6"
+                "libm.so.6"
+                "libresolv.so.2"
+                "libnss_dns.so.2"
+                "libnss_files.so.2"
+            )
+            mkdir -p "$runtime_dst"
+            for runtime_file in "${runtime_required[@]}"; do
+                if [ ! -f "$runtime_src/$runtime_file" ]; then
+                    echo "Missing macOS Linux runtime file: $runtime_src/$runtime_file"
+                    exit 1
+                fi
+                cp -f "$runtime_src/$runtime_file" "$runtime_dst/$runtime_file"
+            done
+            find "$runtime_src" -maxdepth 1 -type f \( -name '*.so' -o -name '*.so.*' \) -exec cp -f {} "$runtime_dst/" \;
+            chmod 755 \
+                "$runtime_dst/slicer-linux-runtime-host-wrapper" \
+                "$runtime_dst/install_runtime_macos.sh" \
+                "$runtime_dst/verify_runtime_macos.sh" \
+                "$runtime_dst/slicer_linux_runtime_host" \
+                "$runtime_dst/slicer_linux_runtime_host_abi1" \
+                "$runtime_dst/slicer_linux_runtime_host_abi0" \
+                "$runtime_dst/ld-linux-x86-64.so.2"
+
             find ./$APP_BUNDLE_NAME/ -name '.DS_Store' -delete
             
             # Copy OrcaSlicer_profile_validator.app if it exists
