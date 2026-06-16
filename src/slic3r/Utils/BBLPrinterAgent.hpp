@@ -91,7 +91,7 @@ private:
 
     struct LastPrintRequest {
         LastPrintRequestType type = LastPrintRequestType::none;
-        PrintParams params;
+        PrintParams params{};
         OnUpdateStatusFn update_fn = nullptr;
         WasCancelledFn cancel_fn = nullptr;
         OnWaitFn wait_fn = nullptr;

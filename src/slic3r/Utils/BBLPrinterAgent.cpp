@@ -96,7 +96,7 @@ void BBLPrinterAgent::remember_last_print_request(LastPrintRequestType type,
 bool BBLPrinterAgent::retry_last_print_request(const std::string& dev_id)
 {
     LastPrintRequestType type = LastPrintRequestType::none;
-    PrintParams params;
+    PrintParams params{};
     OnUpdateStatusFn update_fn = nullptr;
     WasCancelledFn cancel_fn = nullptr;
     OnWaitFn wait_fn = nullptr;

@@ -198,7 +198,7 @@ void PrintJob::process(Ctl &ctl)
         this->task_bed_type = bed_type_to_gcode_string(plate_data.is_valid ? plate_data.bed_type : curr_plate->get_bed_type(true));
     }
 
-    PrintParams params;
+    PrintParams params{};
 
     // local print access
     params.dev_ip = m_dev_ip;
