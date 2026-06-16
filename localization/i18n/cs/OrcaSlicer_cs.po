@@ -23417,8 +23417,6 @@ msgstr ""
 "Zamezte kroucení\n"
 "Víte, že při tisku materiálů náchylných ke kroucení, jako je ABS, může "
 "vhodné zvýšení teploty vyhřívané desky snížit pravděpodobnost kroucení?"
-msgid "Welcome to BambuStudio with OrcaSlicer changes"
-msgstr "Welcome to BambuStudio with OrcaSlicer changes"
 
 #~ msgid ""
 #~ "The Wipe option is not available when using the Firmware Retraction "
@@ -24061,3 +24059,11 @@ msgstr "Welcome to BambuStudio with OrcaSlicer changes"
 #~ "Nastavte tuto hodnotu na 10–15 %, abyste minimalizovali možné "
 #~ "přeextrudování a hromadění materiálu, což by vedlo k nerovnému hornímu "
 #~ "povrchu."
+
+#: src/slic3r/GUI/ConfigWizard.cpp:506 resources/web/guide/1/index.html:20
+msgid "Welcome to BambuStudio with OrcaSlicer changes"
+msgstr "Welcome to BambuStudio with OrcaSlicer changes"
+
+#: src/slic3r/GUI/ConfigWizard.cpp:507
+msgid "Hello, welcome to BambuStudio with OrcaSlicer changes! This configuration wizard helps you with the initial configuration; just a few settings and you will be ready to print."
+msgstr "Hello, welcome to BambuStudio with OrcaSlicer changes! This configuration wizard helps you with the initial configuration; just a few settings and you will be ready to print."

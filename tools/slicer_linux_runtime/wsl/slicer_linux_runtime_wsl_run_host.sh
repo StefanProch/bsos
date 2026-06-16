@@ -18,9 +18,6 @@ if [ -z "$PACKAGE_DIR" ]; then
     exit 127
 fi
 
-if [ -n "$COMPONENT_CACHE_DIR" ] && [ ! -d "$COMPONENT_CACHE_DIR" ] && [ -d "$COMPONENT_CACHE_DIR/plugins" ]; then
-    COMPONENT_CACHE_DIR="$COMPONENT_CACHE_DIR/plugins"
-fi
 if [ -n "$COMPONENT_CACHE_DIR" ] && [ -d "$COMPONENT_CACHE_DIR/plugins" ] && [ ! -f "$COMPONENT_CACHE_DIR/libbambu_networking.so" ] && [ ! -f "$COMPONENT_CACHE_DIR/libBambuSource.so" ]; then
     COMPONENT_CACHE_DIR="$COMPONENT_CACHE_DIR/plugins"
 fi

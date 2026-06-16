@@ -23313,8 +23313,6 @@ msgstr ""
 "Tránh cong vênh\n"
 "Bạn có biết rằng khi in vật liệu dễ cong vênh như ABS, tăng nhiệt độ bàn "
 "nóng một cách thích hợp có thể giảm xác suất cong vênh không?"
-msgid "Welcome to BambuStudio with OrcaSlicer changes"
-msgstr "Welcome to BambuStudio with OrcaSlicer changes"
 
 #~ msgid ""
 #~ "The Wipe option is not available when using the Firmware Retraction "
@@ -24644,3 +24642,11 @@ msgstr "Welcome to BambuStudio with OrcaSlicer changes"
 #, c-format, boost-format
 #~ msgid "*Printing %s material with %s may cause nozzle damage"
 #~ msgstr "*In vật liệu %s với %s có thể gây hư hỏng đầu phun"
+
+#: src/slic3r/GUI/ConfigWizard.cpp:506 resources/web/guide/1/index.html:20
+msgid "Welcome to BambuStudio with OrcaSlicer changes"
+msgstr "Welcome to BambuStudio with OrcaSlicer changes"
+
+#: src/slic3r/GUI/ConfigWizard.cpp:507
+msgid "Hello, welcome to BambuStudio with OrcaSlicer changes! This configuration wizard helps you with the initial configuration; just a few settings and you will be ready to print."
+msgstr "Hello, welcome to BambuStudio with OrcaSlicer changes! This configuration wizard helps you with the initial configuration; just a few settings and you will be ready to print."

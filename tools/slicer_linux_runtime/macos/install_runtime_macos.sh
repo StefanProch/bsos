@@ -269,7 +269,7 @@ select_lima_mode() {
     LIMA_CREATE_ARGS=(start "--name=${INSTANCE}" --tty=false --mount-writable --containerd=none)
 
     if [[ "$host_arch" == "arm64" ]]; then
-        if [[ "$major" -ge 13 && -n "${SLICER_LINUX_RUNTIME_MAC_USE_QEMU:-}" ]]; then
+        if [[ "$major" -ge 13 && "${SLICER_LINUX_RUNTIME_MAC_USE_QEMU:-}" == "1" ]]; then
             LIMA_MODE="qemu-x86_64"
             LIMA_CREATE_ARGS+=(--vm-type=qemu --arch=x86_64 --mount-type=9p)
         elif [[ "$major" -ge 13 && portable_x86_loader_available ]]; then
