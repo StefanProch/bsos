@@ -68,6 +68,7 @@ typedef std::string (*func_build_logout_cmd)(void *agent);
 typedef std::string (*func_build_login_info)(void *agent);
 typedef int (*func_ping_bind)(void *agent, std::string ping_code);
 typedef int (*func_bind_detect)(void *agent, std::string dev_ip, std::string sec_link, detectResult& detect);
+typedef int (*func_report_consent)(void *agent, std::string expand);
 typedef int (*func_set_server_callback)(void *agent, OnServerErrFn fn);
 typedef int (*func_bind)(void *agent, std::string dev_ip, std::string dev_id, std::string sec_link, std::string timezone, bool improved, OnUpdateStatusFn update_fn);
 typedef int (*func_unbind)(void *agent, std::string dev_id);
@@ -91,6 +92,11 @@ typedef int (*func_get_my_message)(void *agent, int type, int after, int limit, 
 typedef int (*func_check_user_task_report)(void *agent, int* task_id, bool* printable);
 typedef int (*func_get_user_print_info)(void *agent, unsigned int* http_code, std::string* http_body);
 typedef int (*func_get_user_tasks)(void *agent, TaskQueryParams params, std::string* http_body);
+typedef int (*func_get_filament_spools)(void *agent, FilamentQueryParams params, std::string* http_body);
+typedef int (*func_create_filament_spool)(void *agent, std::string request_body, std::string* http_body);
+typedef int (*func_update_filament_spool)(void *agent, std::string spool_id, std::string request_body, std::string* http_body);
+typedef int (*func_delete_filament_spools)(void *agent, FilamentDeleteParams params, std::string* http_body);
+typedef int (*func_get_filament_config)(void *agent, std::string* http_body);
 typedef int (*func_get_printer_firmware)(void *agent, std::string dev_id, unsigned* http_code, std::string* http_body);
 typedef int (*func_get_task_plate_index)(void *agent, std::string task_id, int* plate_index);
 typedef int (*func_get_user_info)(void *agent, int* identifier);
@@ -100,6 +106,7 @@ typedef int (*func_get_slice_info)(void *agent, std::string project_id, std::str
 typedef int (*func_query_bind_status)(void *agent, std::vector<std::string> query_list, unsigned int* http_code, std::string* http_body);
 typedef int (*func_modify_printer_name)(void *agent, std::string dev_id, std::string dev_name);
 typedef int (*func_get_camera_url)(void *agent, std::string dev_id, std::function<void(std::string)> callback);
+typedef int (*func_get_camera_url_for_golive)(void *agent, std::string dev_id, std::string sdev_id, std::function<void(std::string)> callback);
 typedef int (*func_get_design_staffpick)(void *agent, int offset, int limit, std::function<void(std::string)> callback);
 typedef int (*func_start_pubilsh)(void *agent, PublishParams params, OnUpdateStatusFn update_fn, WasCancelledFn cancel_fn, std::string* out);
 typedef int (*func_get_model_publish_url)(void *agent, std::string* url);
@@ -120,6 +127,7 @@ typedef int (*func_put_rating_picture_oss)(void *agent, std::string &config, std
 typedef int (*func_get_model_mall_rating_result)(void *agent, int job_id, std::string &rating_result, unsigned int &http_code, std::string &http_error);
 typedef int (*func_get_mw_user_preference)(void *agent, std::function<void(std::string)> callback);
 typedef int (*func_get_mw_user_4ulist)(void *agent, int seed, int limit, std::function<void(std::string)> callback);
+typedef int (*func_get_hms_snapshot)(void* agent, std::string& dev_id, std::string& file_name, std::function<void(std::string, int)> callback);
 
 // Legacy function pointer types (for older DLL versions)
 typedef int (*func_start_print_legacy)(void *agent, PrintParams_Legacy params, OnUpdateStatusFn update_fn, WasCancelledFn cancel_fn, OnWaitFn wait_fn);
@@ -323,6 +331,7 @@ public:
     func_build_login_info get_build_login_info() const { return m_build_login_info; }
     func_ping_bind get_ping_bind() const { return m_ping_bind; }
     func_bind_detect get_bind_detect() const { return m_bind_detect; }
+    func_report_consent get_report_consent() const { return m_report_consent; }
     func_set_server_callback get_set_server_callback() const { return m_set_server_callback; }
     func_bind get_bind() const { return m_bind; }
     func_unbind get_unbind() const { return m_unbind; }
@@ -346,6 +355,11 @@ public:
     func_check_user_task_report get_check_user_task_report() const { return m_check_user_task_report; }
     func_get_user_print_info get_get_user_print_info() const { return m_get_user_print_info; }
     func_get_user_tasks get_get_user_tasks() const { return m_get_user_tasks; }
+    func_get_filament_spools get_get_filament_spools() const { return m_get_filament_spools; }
+    func_create_filament_spool get_create_filament_spool() const { return m_create_filament_spool; }
+    func_update_filament_spool get_update_filament_spool() const { return m_update_filament_spool; }
+    func_delete_filament_spools get_delete_filament_spools() const { return m_delete_filament_spools; }
+    func_get_filament_config get_get_filament_config() const { return m_get_filament_config; }
     func_get_printer_firmware get_get_printer_firmware() const { return m_get_printer_firmware; }
     func_get_task_plate_index get_get_task_plate_index() const { return m_get_task_plate_index; }
     func_get_user_info get_get_user_info() const { return m_get_user_info; }
@@ -355,6 +369,7 @@ public:
     func_query_bind_status get_query_bind_status() const { return m_query_bind_status; }
     func_modify_printer_name get_modify_printer_name() const { return m_modify_printer_name; }
     func_get_camera_url get_get_camera_url() const { return m_get_camera_url; }
+    func_get_camera_url_for_golive get_get_camera_url_for_golive() const { return m_get_camera_url_for_golive; }
     func_get_design_staffpick get_get_design_staffpick() const { return m_get_design_staffpick; }
     func_start_pubilsh get_start_publish() const { return m_start_publish; }
     func_get_model_publish_url get_get_model_publish_url() const { return m_get_model_publish_url; }
@@ -375,6 +390,7 @@ public:
     func_get_model_mall_rating_result get_get_model_mall_rating_result() const { return m_get_model_mall_rating_result; }
     func_get_mw_user_preference get_get_mw_user_preference() const { return m_get_mw_user_preference; }
     func_get_mw_user_4ulist get_get_mw_user_4ulist() const { return m_get_mw_user_4ulist; }
+    func_get_hms_snapshot get_get_hms_snapshot() const { return m_get_hms_snapshot; }
 
     // ========================================================================
     // Legacy Helper

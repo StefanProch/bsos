@@ -41,6 +41,7 @@ inline nlohmann::json to_json(const BBL::PrintParams& p)
         {"task_vibration_cali", p.task_vibration_cali},
         {"task_layer_inspect", p.task_layer_inspect},
         {"task_record_timelapse", p.task_record_timelapse},
+        {"task_timelapse_use_internal", p.task_timelapse_use_internal},
         {"task_use_ams", p.task_use_ams},
         {"task_bed_type", p.task_bed_type},
         {"extra_options", p.extra_options},
@@ -49,7 +50,8 @@ inline nlohmann::json to_json(const BBL::PrintParams& p)
         {"auto_offset_cali", p.auto_offset_cali},
         {"extruder_cali_manual_mode", p.extruder_cali_manual_mode},
         {"task_ext_change_assist", p.task_ext_change_assist},
-        {"try_emmc_print", p.try_emmc_print}
+        {"try_emmc_print", p.try_emmc_print},
+        {"svc_context", p.svc_context}
     };
 }
 
@@ -89,6 +91,7 @@ inline BBL::PrintParams print_params_from_json(const nlohmann::json& j)
     p.task_vibration_cali = j.value("task_vibration_cali", false);
     p.task_layer_inspect = j.value("task_layer_inspect", false);
     p.task_record_timelapse = j.value("task_record_timelapse", false);
+    p.task_timelapse_use_internal = j.value("task_timelapse_use_internal", false);
     p.task_use_ams = j.value("task_use_ams", false);
     p.task_bed_type = j.value("task_bed_type", std::string());
     p.extra_options = j.value("extra_options", std::string());
@@ -98,6 +101,7 @@ inline BBL::PrintParams print_params_from_json(const nlohmann::json& j)
     p.extruder_cali_manual_mode = j.value("extruder_cali_manual_mode", -1);
     p.task_ext_change_assist = j.value("task_ext_change_assist", false);
     p.try_emmc_print = j.value("try_emmc_print", false);
+    p.svc_context = j.value("svc_context", std::string());
     return p;
 }
 

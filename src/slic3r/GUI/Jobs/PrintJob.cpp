@@ -262,6 +262,7 @@ void PrintJob::process(Ctl &ctl)
     params.task_vibration_cali  = this->task_vibration_cali;
     params.task_layer_inspect   = this->task_layer_inspect;
     params.task_record_timelapse= this->task_record_timelapse;
+    params.task_timelapse_use_internal = this->task_timelapse_use_internal;
     params.nozzle_mapping       = this->task_nozzle_mapping;
     params.ams_mapping          = this->task_ams_mapping;
     params.ams_mapping2         = this->task_ams_mapping2;
@@ -274,7 +275,9 @@ void PrintJob::process(Ctl &ctl)
     params.auto_bed_leveling    = this->auto_bed_leveling;
     params.auto_flow_cali       = this->auto_flow_cali;
     params.auto_offset_cali     = this->auto_offset_cali;
+    params.extruder_cali_manual_mode = this->extruder_cali_manual_mode;
     params.task_ext_change_assist = this->task_ext_change_assist;
+    params.svc_context          = "";
     // Allow disabling the eMMC print path via AppConfig. Plugin 02.03.00.62's
     // eMMC tunnel code hangs indefinitely at the upload phase with some
     // printers (e.g., Bambu H2D), so we default to disabled. Users with
@@ -331,6 +334,10 @@ void PrintJob::process(Ctl &ctl)
                 } catch (...) {}
             }
         }
+
+        auto svc_context = model_info->metadata_items.find("SvcContext");
+        if (svc_context != model_info->metadata_items.end())
+            params.svc_context = svc_context->second;
     }
 
     params.stl_design_id = 0;
@@ -368,6 +375,19 @@ void PrintJob::process(Ctl &ctl)
                 stl_design_id = 0;
             }
             params.stl_design_id = stl_design_id;
+        }
+    }
+
+    const auto& model_design_id = wxGetApp().model().design_id;
+    if (params.stl_design_id == 0 || !model_design_id.empty()) {
+        if (model_design_id.empty()) {
+            params.stl_design_id = 0;
+        } else {
+            try {
+                params.stl_design_id = std::stoi(model_design_id);
+            } catch (...) {
+                params.stl_design_id = 0;
+            }
         }
     }
 

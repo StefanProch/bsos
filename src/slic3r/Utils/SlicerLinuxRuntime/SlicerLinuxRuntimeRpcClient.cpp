@@ -211,6 +211,10 @@ void RpcClient::reader_loop()
                 if (m_reader_stop.load(std::memory_order_acquire))
                     break;
                 m_last_error = error.empty() ? "runtime host closed stdout" : error;
+                try {
+                    if (proc && proc->child.valid() && !proc->child.running())
+                        m_last_error += ", child exit code=" + std::to_string(proc->child.exit_code());
+                } catch (...) {}
                 local_error = m_last_error;
                 pending = m_pending;
                 m_pending.clear();

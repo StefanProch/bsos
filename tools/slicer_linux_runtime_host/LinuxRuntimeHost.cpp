@@ -290,6 +290,7 @@ BBL::PrintParams print_params_from_json(const nlohmann::json& j)
     p.task_vibration_cali = j.value("task_vibration_cali", false);
     p.task_layer_inspect = j.value("task_layer_inspect", false);
     p.task_record_timelapse = j.value("task_record_timelapse", false);
+    p.task_timelapse_use_internal = j.value("task_timelapse_use_internal", false);
     p.task_use_ams = j.value("task_use_ams", false);
     p.task_bed_type = j.value("task_bed_type", std::string());
     p.extra_options = j.value("extra_options", std::string());
@@ -299,6 +300,7 @@ BBL::PrintParams print_params_from_json(const nlohmann::json& j)
     p.extruder_cali_manual_mode = j.value("extruder_cali_manual_mode", -1);
     p.task_ext_change_assist = j.value("task_ext_change_assist", false);
     p.try_emmc_print = j.value("try_emmc_print", false);
+    p.svc_context = j.value("svc_context", std::string());
     translate_print_params_paths(p);
     return p;
 }
@@ -1057,12 +1059,28 @@ nlohmann::json LinuxRuntimeHost::handle(const std::string& method, const nlohman
         if (!f || !a) return not_supported(method);
         const auto job_id = payload.value("client_job_id", 0LL);
         const auto params_json = payload.value("params", nlohmann::json::object());
+        auto params = print_params_from_json(params_json);
+        host_log_json("net.start_print.params", {
+            {"dev_id", params.dev_id},
+            {"connection_type", params.connection_type},
+            {"comments", params.comments},
+            {"filename", params.filename},
+            {"filename_exists", path_exists(params.filename)},
+            {"config_filename", params.config_filename},
+            {"config_exists", params.config_filename.empty() ? true : path_exists(params.config_filename)},
+            {"plate_index", params.plate_index},
+            {"task_use_ams", params.task_use_ams},
+            {"task_record_timelapse", params.task_record_timelapse},
+            {"task_timelapse_use_internal", params.task_timelapse_use_internal},
+            {"try_emmc_print", params.try_emmc_print},
+            {"svc_context_len", params.svc_context.size()}
+        });
         auto job = std::make_shared<HostJobState>();
         job->job_id = job_id;
         job->agent_handle = agent_id;
         job->kind = "start_print";
         register_job(job);
-        const int ret = f(a, print_params_from_json(params_json),
+        const int ret = f(a, params,
             [this, job](int status, int code, std::string msg) {
                 queue_event(job->agent_handle, "job.update_status", {{"job_id", job->job_id}, {"kind", job->kind}, {"status", status}, {"code", code}, {"msg", msg}});
             },
@@ -1074,6 +1092,7 @@ nlohmann::json LinuxRuntimeHost::handle(const std::string& method, const nlohman
                 return !job->cancel_requested.load();
             });
         unregister_job(job_id);
+        host_log_json("net.start_print.result", {{"value", ret}, {"job_id", job_id}});
         return {{"ok", true}, {"value", ret}, {"job_id", job_id}};
     }
 
@@ -1172,6 +1191,11 @@ nlohmann::json LinuxRuntimeHost::handle(const std::string& method, const nlohman
     if (method == "net.get_user_info") { auto f = net<int (*)(void*, int*)>("bambu_network_get_user_info"); auto a = lookup_agent(); if (!f || !a) return not_supported(method); int identifier = 0; const int ret = f(a, &identifier); return {{"ok", true}, {"value", ret}, {"identifier", identifier}}; }
     if (method == "net.request_bind_ticket") { auto f = net<int (*)(void*, std::string*)>("bambu_network_request_bind_ticket"); auto a = lookup_agent(); if (!f || !a) return not_supported(method); std::string ticket; const int ret = f(a, &ticket); return {{"ok", true}, {"value", ret}, {"ticket", ticket}}; }
     if (method == "net.query_bind_status") { auto f = net<int (*)(void*, std::vector<std::string>, unsigned int*, std::string*)>("bambu_network_query_bind_status"); auto a = lookup_agent(); if (!f || !a) return not_supported(method); unsigned int http_code = 0; std::string http_body; const int ret = f(a, payload.value("query_list", std::vector<std::string>()), &http_code, &http_body); return {{"ok", true}, {"value", ret}, {"http_code", http_code}, {"http_body", http_body}}; }
+    if (method == "net.get_filament_spools") { auto f = net<int (*)(void*, FilamentQueryParams, std::string*)>("bambu_network_get_filament_spools"); auto a = lookup_agent(); if (!f || !a) return not_supported(method); FilamentQueryParams params; params.category = payload.value("category", std::string()); params.status = payload.value("status", std::string()); params.spool_id = payload.value("spool_id", std::string()); params.rfid = payload.value("rfid", std::string()); params.offset = payload.value("offset", 0); params.limit = payload.value("limit", 20); std::string http_body; const int ret = f(a, params, &http_body); return {{"ok", true}, {"value", ret}, {"http_body", http_body}}; }
+    if (method == "net.create_filament_spool") { auto f = net<int (*)(void*, std::string, std::string*)>("bambu_network_create_filament_spool"); auto a = lookup_agent(); if (!f || !a) return not_supported(method); std::string http_body; const int ret = f(a, payload.value("request_body", std::string()), &http_body); return {{"ok", true}, {"value", ret}, {"http_body", http_body}}; }
+    if (method == "net.update_filament_spool") { auto f = net<int (*)(void*, std::string, std::string, std::string*)>("bambu_network_update_filament_spool"); auto a = lookup_agent(); if (!f || !a) return not_supported(method); std::string http_body; const int ret = f(a, payload.value("spool_id", std::string()), payload.value("request_body", std::string()), &http_body); return {{"ok", true}, {"value", ret}, {"http_body", http_body}}; }
+    if (method == "net.delete_filament_spools") { auto f = net<int (*)(void*, FilamentDeleteParams, std::string*)>("bambu_network_delete_filament_spools"); auto a = lookup_agent(); if (!f || !a) return not_supported(method); FilamentDeleteParams params; params.ids = payload.value("ids", std::vector<std::string>()); params.rfids = payload.value("rfids", std::vector<std::string>()); std::string http_body; const int ret = f(a, params, &http_body); return {{"ok", true}, {"value", ret}, {"http_body", http_body}}; }
+    if (method == "net.get_filament_config") { auto f = net<int (*)(void*, std::string*)>("bambu_network_get_filament_config"); auto a = lookup_agent(); if (!f || !a) return not_supported(method); std::string http_body; const int ret = f(a, &http_body); return {{"ok", true}, {"value", ret}, {"http_body", http_body}}; }
     if (method == "net.get_printer_firmware") { auto f = net<int (*)(void*, std::string, unsigned*, std::string*)>("bambu_network_get_printer_firmware"); auto a = lookup_agent(); if (!f || !a) return not_supported(method); unsigned http_code = 0; std::string http_body; const int ret = f(a, payload.value("dev_id", std::string()), &http_code, &http_body); return {{"ok", true}, {"value", ret}, {"http_code", http_code}, {"http_body", http_body}}; }
     if (method == "net.get_my_profile") { auto f = net<int (*)(void*, std::string, unsigned int*, std::string*)>("bambu_network_get_my_profile"); auto a = lookup_agent(); if (!f || !a) return not_supported(method); unsigned int http_code = 0; std::string http_body; const int ret = f(a, payload.value("token", std::string()), &http_code, &http_body); return {{"ok", true}, {"value", ret}, {"http_code", http_code}, {"http_body", http_body}}; }
     if (method == "net.request_setting_id") { auto f = net<std::string (*)(void*, std::string, std::map<std::string, std::string>*, unsigned int*)>("bambu_network_request_setting_id"); auto a = lookup_agent(); if (!f || !a) return not_supported(method); auto values = json_to_string_map(payload.value("values", nlohmann::json::object())); unsigned int http_code = 0; std::string setting_id = f(a, payload.value("name", std::string()), &values, &http_code); return {{"ok", true}, {"value", 0}, {"setting_id", setting_id}, {"http_code", http_code}}; }
@@ -1200,7 +1224,7 @@ nlohmann::json LinuxRuntimeHost::handle(const std::string& method, const nlohman
     if (method == "net.get_model_mall_rating") { auto f = net<int (*)(void*, int, std::string&, unsigned int&, std::string&)>("bambu_network_get_model_mall_rating"); auto a = lookup_agent(); if (!f || !a) return not_supported(method); std::string rating_result; unsigned int http_code = 0; std::string http_error; const int ret = f(a, payload.value("job_id", 0), rating_result, http_code, http_error); return {{"ok", true}, {"value", ret}, {"rating_result", rating_result}, {"http_code", http_code}, {"http_error", http_error}}; }
     if (method == "net.get_mw_user_preference") { auto f = net<int (*)(void*, std::function<void(std::string)>)>("bambu_network_get_mw_user_preference"); auto a = lookup_agent(); if (!f || !a) return not_supported(method); return wait_string_callback([&](auto cb) { return f(a, cb); }); }
     if (method == "net.get_mw_user_4ulist") { auto f = net<int (*)(void*, int, int, std::function<void(std::string)>)>("bambu_network_get_mw_user_4ulist"); auto a = lookup_agent(); if (!f || !a) return not_supported(method); return wait_string_callback([&](auto cb) { return f(a, payload.value("seed", 0), payload.value("limit", 0), cb); }); }
-    if (method == "net.get_hms_snapshot") { auto f = net<int (*)(void*, std::string, std::string, std::function<void(std::string, int)>)>("bambu_network_get_hms_snapshot"); auto a = lookup_agent(); if (!f || !a) return not_supported(method); return wait_string_int_callback([&](auto cb) { return f(a, payload.value("dev_id", std::string()), windows_path_to_wsl(payload.value("file_name", std::string())), cb); }); }
+    if (method == "net.get_hms_snapshot") { auto f = net<int (*)(void*, std::string&, std::string&, std::function<void(std::string, int)>)>("bambu_network_get_hms_snapshot"); auto a = lookup_agent(); if (!f || !a) return not_supported(method); std::string dev_id = payload.value("dev_id", std::string()); std::string file_name = windows_path_to_wsl(payload.value("file_name", std::string())); return wait_string_int_callback([&](auto cb) { return f(a, dev_id, file_name, cb); }); }
 
     if (method == "net.get_my_token") { auto f = net<int (*)(void*, std::string, unsigned int*, std::string*)>("bambu_network_get_my_token"); auto a = lookup_agent(); if (!f || !a) return not_supported(method); unsigned int http_code = 0; std::string http_body; const int ret = f(a, payload.value("ticket", std::string()), &http_code, &http_body); return {{"ok", true}, {"value", ret}, {"http_code", http_code}, {"http_body", http_body}}; }
 

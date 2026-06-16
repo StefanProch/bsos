@@ -28613,8 +28613,8 @@ msgstr ""
 
 #: src/slic3r/GUI/ConfigWizard.cpp:506 resources/web/guide/1/index.html:20
 msgid "Welcome to BambuStudio with OrcaSlicer changes"
-msgstr "Welcome to BambuStudio with OrcaSlicer changes"
+msgstr "Bienvenue dans BambuStudio avec les modifications d'OrcaSlicer"
 
 #: src/slic3r/GUI/ConfigWizard.cpp:507
 msgid "Hello, welcome to BambuStudio with OrcaSlicer changes! This configuration wizard helps you with the initial configuration; just a few settings and you will be ready to print."
-msgstr "Hello, welcome to BambuStudio with OrcaSlicer changes! This configuration wizard helps you with the initial configuration; just a few settings and you will be ready to print."
+msgstr "Bonjour, bienvenue dans BambuStudio avec les modifications d'OrcaSlicer. Cet assistant de configuration vous aide pour la configuration initiale; quelques réglages seulement et vous serez prêt à imprimer."

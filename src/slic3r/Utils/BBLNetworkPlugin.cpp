@@ -742,6 +742,7 @@ void BBLNetworkPlugin::load_all_function_pointers()
     m_build_login_info = reinterpret_cast<func_build_login_info>(get_function("bambu_network_build_login_info"));
     m_ping_bind = reinterpret_cast<func_ping_bind>(get_function("bambu_network_ping_bind"));
     m_bind_detect = reinterpret_cast<func_bind_detect>(get_function("bambu_network_bind_detect"));
+    m_report_consent = reinterpret_cast<func_report_consent>(get_function("bambu_network_report_consent"));
     m_set_server_callback = reinterpret_cast<func_set_server_callback>(get_function("bambu_network_set_server_callback"));
     m_bind = reinterpret_cast<func_bind>(get_function("bambu_network_bind"));
     m_unbind = reinterpret_cast<func_unbind>(get_function("bambu_network_unbind"));
@@ -765,6 +766,11 @@ void BBLNetworkPlugin::load_all_function_pointers()
     m_check_user_task_report = reinterpret_cast<func_check_user_task_report>(get_function("bambu_network_check_user_task_report"));
     m_get_user_print_info = reinterpret_cast<func_get_user_print_info>(get_function("bambu_network_get_user_print_info"));
     m_get_user_tasks = reinterpret_cast<func_get_user_tasks>(get_function("bambu_network_get_user_tasks"));
+    m_get_filament_spools = reinterpret_cast<func_get_filament_spools>(get_function("bambu_network_get_filament_spools"));
+    m_create_filament_spool = reinterpret_cast<func_create_filament_spool>(get_function("bambu_network_create_filament_spool"));
+    m_update_filament_spool = reinterpret_cast<func_update_filament_spool>(get_function("bambu_network_update_filament_spool"));
+    m_delete_filament_spools = reinterpret_cast<func_delete_filament_spools>(get_function("bambu_network_delete_filament_spools"));
+    m_get_filament_config = reinterpret_cast<func_get_filament_config>(get_function("bambu_network_get_filament_config"));
     m_get_printer_firmware = reinterpret_cast<func_get_printer_firmware>(get_function("bambu_network_get_printer_firmware"));
     m_get_task_plate_index = reinterpret_cast<func_get_task_plate_index>(get_function("bambu_network_get_task_plate_index"));
     m_get_user_info = reinterpret_cast<func_get_user_info>(get_function("bambu_network_get_user_info"));
@@ -774,6 +780,7 @@ void BBLNetworkPlugin::load_all_function_pointers()
     m_query_bind_status = reinterpret_cast<func_query_bind_status>(get_function("bambu_network_query_bind_status"));
     m_modify_printer_name = reinterpret_cast<func_modify_printer_name>(get_function("bambu_network_modify_printer_name"));
     m_get_camera_url = reinterpret_cast<func_get_camera_url>(get_function("bambu_network_get_camera_url"));
+    m_get_camera_url_for_golive = reinterpret_cast<func_get_camera_url_for_golive>(get_function("bambu_network_get_camera_url_for_golive"));
     m_get_design_staffpick = reinterpret_cast<func_get_design_staffpick>(get_function("bambu_network_get_design_staffpick"));
     m_start_publish = reinterpret_cast<func_start_pubilsh>(get_function("bambu_network_start_publish"));
     m_get_model_publish_url = reinterpret_cast<func_get_model_publish_url>(get_function("bambu_network_get_model_publish_url"));
@@ -794,6 +801,7 @@ void BBLNetworkPlugin::load_all_function_pointers()
     m_get_model_mall_rating_result = reinterpret_cast<func_get_model_mall_rating_result>(get_function("bambu_network_get_model_mall_rating"));
     m_get_mw_user_preference = reinterpret_cast<func_get_mw_user_preference>(get_function("bambu_network_get_mw_user_preference"));
     m_get_mw_user_4ulist = reinterpret_cast<func_get_mw_user_4ulist>(get_function("bambu_network_get_mw_user_4ulist"));
+    m_get_hms_snapshot = reinterpret_cast<func_get_hms_snapshot>(get_function("bambu_network_get_hms_snapshot"));
 }
 
 void BBLNetworkPlugin::clear_all_function_pointers()
@@ -846,6 +854,7 @@ void BBLNetworkPlugin::clear_all_function_pointers()
     m_build_login_info = nullptr;
     m_ping_bind = nullptr;
     m_bind_detect = nullptr;
+    m_report_consent = nullptr;
     m_set_server_callback = nullptr;
     m_bind = nullptr;
     m_unbind = nullptr;
@@ -869,6 +878,11 @@ void BBLNetworkPlugin::clear_all_function_pointers()
     m_check_user_task_report = nullptr;
     m_get_user_print_info = nullptr;
     m_get_user_tasks = nullptr;
+    m_get_filament_spools = nullptr;
+    m_create_filament_spool = nullptr;
+    m_update_filament_spool = nullptr;
+    m_delete_filament_spools = nullptr;
+    m_get_filament_config = nullptr;
     m_get_printer_firmware = nullptr;
     m_get_task_plate_index = nullptr;
     m_get_user_info = nullptr;
@@ -878,6 +892,7 @@ void BBLNetworkPlugin::clear_all_function_pointers()
     m_query_bind_status = nullptr;
     m_modify_printer_name = nullptr;
     m_get_camera_url = nullptr;
+    m_get_camera_url_for_golive = nullptr;
     m_get_design_staffpick = nullptr;
     m_start_publish = nullptr;
     m_get_model_publish_url = nullptr;
@@ -898,6 +913,7 @@ void BBLNetworkPlugin::clear_all_function_pointers()
     m_get_model_mall_rating_result = nullptr;
     m_get_mw_user_preference = nullptr;
     m_get_mw_user_4ulist = nullptr;
+    m_get_hms_snapshot = nullptr;
 }
 
 std::vector<NetworkLibraryVersionInfo> get_all_available_versions()

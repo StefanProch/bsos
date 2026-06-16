@@ -576,6 +576,46 @@
     "notes": "TaskQueryParams and body routed"
   },
   {
+    "symbol": "bambu_network_get_filament_spools",
+    "exported_name": "bambu_network_get_filament_spools",
+    "area": "network",
+    "status": "implemented",
+    "stability": "stable",
+    "notes": "FilamentQueryParams and body routed"
+  },
+  {
+    "symbol": "bambu_network_create_filament_spool",
+    "exported_name": "bambu_network_create_filament_spool",
+    "area": "network",
+    "status": "implemented",
+    "stability": "stable",
+    "notes": "request body and response body routed"
+  },
+  {
+    "symbol": "bambu_network_update_filament_spool",
+    "exported_name": "bambu_network_update_filament_spool",
+    "area": "network",
+    "status": "implemented",
+    "stability": "stable",
+    "notes": "request body and response body routed"
+  },
+  {
+    "symbol": "bambu_network_delete_filament_spools",
+    "exported_name": "bambu_network_delete_filament_spools",
+    "area": "network",
+    "status": "implemented",
+    "stability": "stable",
+    "notes": "FilamentDeleteParams and response body routed"
+  },
+  {
+    "symbol": "bambu_network_get_filament_config",
+    "exported_name": "bambu_network_get_filament_config",
+    "area": "network",
+    "status": "implemented",
+    "stability": "stable",
+    "notes": "filament config body routed"
+  },
+  {
     "symbol": "bambu_network_get_printer_firmware",
     "exported_name": "bambu_network_get_printer_firmware",
     "area": "network",

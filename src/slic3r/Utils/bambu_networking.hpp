@@ -46,6 +46,11 @@ namespace Slic3r {
 #define BAMBU_NETWORK_ERR_NO_CORRESPONDING_BUCKET       -24
 #define BAMBU_NETWORK_ERR_GET_INSTANCE_ID_FAILED        -25
 #define BAMBU_NETWORK_SIGNED_ERROR                      -26
+#define BAMBU_NETWORK_ERR_GET_FILAMENTS_FAILED          -27
+#define BAMBU_NETWORK_ERR_CREATE_FILAMENT_FAILED        -28
+#define BAMBU_NETWORK_ERR_UPDATE_FILAMENT_FAILED        -29
+#define BAMBU_NETWORK_ERR_DELETE_FILAMENT_FAILED        -30
+#define BAMBU_NETWORK_ERR_GET_FILAMENT_CONFIG_FAILED    -31
 
 #define BAMBU_NETWORK_ERR_BIND_CREATE_SOCKET_FAILED          -1010
 #define BAMBU_NETWORK_ERR_BIND_SOCKET_CONNECT_FAILED         -1020
@@ -248,6 +253,7 @@ struct PrintParams {
     bool task_vibration_cali;
     bool task_layer_inspect;
     bool task_record_timelapse;
+    bool task_timelapse_use_internal;
     bool task_use_ams;
     std::string task_bed_type;
     std::string extra_options;
@@ -257,6 +263,7 @@ struct PrintParams {
     int extruder_cali_manual_mode{-1};
     bool task_ext_change_assist;
     bool try_emmc_print;
+    std::string svc_context;
 };
 
 struct TaskQueryParams {
@@ -264,6 +271,20 @@ struct TaskQueryParams {
     int status = 0;
     int offset = 0;
     int limit = 20;
+};
+
+struct FilamentQueryParams {
+    std::string category;
+    std::string status;
+    std::string spool_id;
+    std::string rfid;
+    int offset = 0;
+    int limit = 20;
+};
+
+struct FilamentDeleteParams {
+    std::vector<std::string> ids;
+    std::vector<std::string> rfids;
 };
 
 struct PublishParams {

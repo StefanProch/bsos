@@ -1,19 +1,93 @@
 #include "LinuxRuntimeHost.hpp"
 #include "../../src/slic3r/Utils/SlicerLinuxRuntime/SlicerLinuxRuntimeRpcProtocol.hpp"
 
-#include <cstdlib>
-#include <iostream>
-#include <mutex>
-#include <string>
-#include <vector>
-#include <fstream>
-#include <unistd.h>
+#include <algorithm>
+#include <cerrno>
 #include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <iostream>
+#include <memory>
+#include <mutex>
+#include <streambuf>
+#include <string>
 #include <thread>
+#include <unistd.h>
+#include <vector>
 
 using namespace Slic3r::SlicerLinuxRuntime;
 
 namespace {
+
+class FdOutputBuffer : public std::streambuf {
+public:
+    explicit FdOutputBuffer(int fd) : m_fd(fd) { setp(m_buffer, m_buffer + sizeof(m_buffer)); }
+
+    ~FdOutputBuffer() override
+    {
+        sync();
+        if (m_fd >= 0)
+            ::close(m_fd);
+    }
+
+    FdOutputBuffer(const FdOutputBuffer&) = delete;
+    FdOutputBuffer& operator=(const FdOutputBuffer&) = delete;
+
+protected:
+    int overflow(int ch) override
+    {
+        if (flush_buffer() != 0)
+            return traits_type::eof();
+        if (!traits_type::eq_int_type(ch, traits_type::eof())) {
+            *pptr() = traits_type::to_char_type(ch);
+            pbump(1);
+        }
+        return ch;
+    }
+
+    int sync() override { return flush_buffer(); }
+
+private:
+    int flush_buffer()
+    {
+        const char* data = pbase();
+        std::ptrdiff_t size = pptr() - pbase();
+        while (size > 0) {
+            const ssize_t written = ::write(m_fd, data, static_cast<std::size_t>(size));
+            if (written < 0) {
+                if (errno == EINTR)
+                    continue;
+                return -1;
+            }
+            if (written == 0)
+                return -1;
+            data += written;
+            size -= written;
+        }
+        setp(m_buffer, m_buffer + sizeof(m_buffer));
+        return 0;
+    }
+
+    int m_fd{-1};
+    char m_buffer[16384]{};
+};
+
+int open_rpc_output(std::unique_ptr<FdOutputBuffer>& buffer, std::unique_ptr<std::ostream>& out)
+{
+    const int rpc_fd = ::dup(STDOUT_FILENO);
+    if (rpc_fd < 0)
+        return 100;
+
+    std::fflush(stdout);
+    if (::dup2(STDERR_FILENO, STDOUT_FILENO) < 0) {
+        ::close(rpc_fd);
+        return 102;
+    }
+
+    buffer = std::make_unique<FdOutputBuffer>(rpc_fd);
+    out = std::make_unique<std::ostream>(buffer.get());
+    return out->good() ? 0 : 101;
+}
 
 int run_probe_load()
 {
@@ -25,6 +99,23 @@ int run_probe_load()
     if (!hs.value("source_loaded", false))
         return 3;
     return 0;
+}
+
+int run_probe_stdio_roundtrip()
+{
+    std::unique_ptr<FdOutputBuffer> rpc_buffer;
+    std::unique_ptr<std::ostream> rpc_out;
+    const int rc = open_rpc_output(rpc_buffer, rpc_out);
+    if (rc != 0)
+        return rc;
+
+    char ch = 0;
+    if (::read(STDIN_FILENO, &ch, 1) != 1)
+        return 110;
+
+    *rpc_out << "SLICER_RUNTIME_STDIO_OK\n";
+    rpc_out->flush();
+    return rpc_out->good() ? 0 : 111;
 }
 
 int run_probe_auth()
@@ -62,6 +153,7 @@ int run_probe_auth()
 
     return 0;
 }
+
 }
 
 int main(int argc, char** argv)
@@ -71,17 +163,18 @@ int main(int argc, char** argv)
     if (argc > 1 && std::string(argv[1]) == "--probe-load")
         return run_probe_load();
 
+    if (argc > 1 && std::string(argv[1]) == "--probe-stdio-roundtrip")
+        return run_probe_stdio_roundtrip();
+
     if (argc > 1 && std::string(argv[1]) == "--probe-auth")
         return run_probe_auth();
 
-    const int rpc_fd = ::dup(STDOUT_FILENO);
-    if (rpc_fd < 0)
-        return 100;
-    std::fflush(stdout);
-    ::dup2(STDERR_FILENO, STDOUT_FILENO);
-    std::ofstream rpc_out(std::string("/proc/self/fd/") + std::to_string(rpc_fd), std::ios::binary | std::ios::out);
-    if (!rpc_out.good())
-        return 101;
+    std::unique_ptr<FdOutputBuffer> rpc_buffer;
+    std::unique_ptr<std::ostream> rpc_out_ptr;
+    const int rc = open_rpc_output(rpc_buffer, rpc_out_ptr);
+    if (rc != 0)
+        return rc;
+    std::ostream& rpc_out = *rpc_out_ptr;
 
     LinuxRuntimeHost host;
     std::mutex out_mutex;

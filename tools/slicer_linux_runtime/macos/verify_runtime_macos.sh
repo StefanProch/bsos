@@ -63,7 +63,7 @@ COMPONENT_CACHE_DIR=$(normalize_component_cache_dir "$COMPONENT_CACHE_DIR")
 APP_SUPPORT_DIR="$HOME/Library/Application Support/BambuStudio_OrcaSlicer/slicer-linux-runtime"
 RUNTIME_DIR="${SLICER_LINUX_RUNTIME_MAC_RUNTIME_DIR:-$APP_SUPPORT_DIR/runtime}"
 LOG_DIR="$APP_SUPPORT_DIR/logs"
-INSTALL_VERSION="SLICER-LINUX-RUNTIME-MAC-0.13"
+INSTALL_VERSION="SLICER-LINUX-RUNTIME-MAC-0.14"
 INSTALL_VERSION_FILE="$APP_SUPPORT_DIR/install_version.txt"
 PROBE_MARKER_FILE="$APP_SUPPORT_DIR/component_probe_marker.txt"
 mkdir -p "$APP_SUPPORT_DIR" "$LOG_DIR"
@@ -175,10 +175,29 @@ sync_runtime_payload() {
     chmod 755 "$RUNTIME_DIR"/*.so "$RUNTIME_DIR"/*.so.* 2>/dev/null || true
 }
 
+runtime_host_env_prefix() {
+    printf '%s' "export SLICER_LINUX_RUNTIME_COMPONENT_DIR=$(shell_quote "$RUNTIME_DIR"); "
+    printf '%s' "export SLICER_LINUX_RUNTIME_COMPONENT_SO=$(shell_quote "$RUNTIME_DIR/libbambu_networking.so"); "
+    printf '%s' "export SLICER_LINUX_RUNTIME_SOURCE_SO=$(shell_quote "$RUNTIME_DIR/libBambuSource.so"); "
+    printf '%s' "export SLICER_LINUX_RUNTIME_MEDIA_SO=$(shell_quote "$RUNTIME_DIR/liblive555.so"); "
+    printf '%s' "export SLICER_LINUX_RUNTIME_PROBE_LOG_DIR=$(shell_quote "$LOG_DIR"); "
+    printf '%s' "export SLICER_LINUX_RUNTIME_COUNTRY_CODE=PL; "
+    printf '%s' "unset LD_LIBRARY_PATH; "
+    printf '%s' "if [ -f $(shell_quote "$RUNTIME_DIR/ca-certificates.crt") ]; then export SSL_CERT_FILE=$(shell_quote "$RUNTIME_DIR/ca-certificates.crt"); export CURL_CA_BUNDLE=$(shell_quote "$RUNTIME_DIR/ca-certificates.crt"); fi; "
+}
+
 probe_linux_payload() {
     local cmd
-    cmd="export SLICER_LINUX_RUNTIME_COMPONENT_DIR=$(shell_quote "$RUNTIME_DIR"); export SLICER_LINUX_RUNTIME_COMPONENT_SO=$(shell_quote "$RUNTIME_DIR/libbambu_networking.so"); export SLICER_LINUX_RUNTIME_SOURCE_SO=$(shell_quote "$RUNTIME_DIR/libBambuSource.so"); export SLICER_LINUX_RUNTIME_MEDIA_SO=$(shell_quote "$RUNTIME_DIR/liblive555.so"); export SLICER_LINUX_RUNTIME_PROBE_LOG_DIR=$(shell_quote "$LOG_DIR"); export SLICER_LINUX_RUNTIME_COUNTRY_CODE=PL; unset LD_LIBRARY_PATH; if [ -f $(shell_quote "$RUNTIME_DIR/ca-certificates.crt") ]; then export SSL_CERT_FILE=$(shell_quote "$RUNTIME_DIR/ca-certificates.crt"); export CURL_CA_BUNDLE=$(shell_quote "$RUNTIME_DIR/ca-certificates.crt"); fi; exec /bin/sh $(shell_quote "$RUNTIME_DIR/slicer_linux_runtime_host") --probe-load"
+    cmd="$(runtime_host_env_prefix) exec /bin/sh $(shell_quote "$RUNTIME_DIR/slicer_linux_runtime_host") --probe-load"
     "$LIMACTL" shell "$INSTANCE" -- /bin/sh -lc "$cmd"
+
+    local out
+    cmd="$(runtime_host_env_prefix) exec /bin/sh $(shell_quote "$RUNTIME_DIR/slicer_linux_runtime_host") --probe-stdio-roundtrip"
+    out=$(printf x | "$LIMACTL" shell "$INSTANCE" -- /bin/sh -lc "$cmd")
+    if [[ "$out" != "SLICER_RUNTIME_STDIO_OK" ]]; then
+        echo "runtime stdio roundtrip probe failed: ${out:-<empty>}" >&2
+        return 1
+    fi
 }
 
 component_probe_marker_value() {
