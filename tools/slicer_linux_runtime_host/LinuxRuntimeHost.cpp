@@ -1214,6 +1214,29 @@ nlohmann::json LinuxRuntimeHost::handle(const std::string& method, const nlohman
     if (method == "net.get_camera_url") { auto f = net<int (*)(void*, std::string, std::function<void(std::string)>)>("bambu_network_get_camera_url"); auto a = lookup_agent(); if (!f || !a) return not_supported(method); return wait_string_callback([&](auto cb) { return f(a, payload.value("dev_id", std::string()), cb); }); }
     if (method == "net.get_camera_url_for_golive") { auto f = net<int (*)(void*, std::string, std::string, std::function<void(std::string)>)>("bambu_network_get_camera_url_for_golive"); auto a = lookup_agent(); if (!f || !a) return not_supported(method); return wait_string_callback([&](auto cb) { return f(a, payload.value("dev_id", std::string()), payload.value("sdev_id", std::string()), cb); }); }
     if (method == "net.get_design_staffpick") { auto f = net<int (*)(void*, int, int, std::function<void(std::string)>)>("bambu_network_get_design_staffpick"); auto a = lookup_agent(); if (!f || !a) return not_supported(method); return wait_string_callback([&](auto cb) { return f(a, payload.value("offset", 0), payload.value("limit", 0), cb); }); }
+    if (method == "net.start_publish") {
+        auto f = net<int (*)(void*, BBL::PublishParams, OnUpdateStatusFn, WasCancelledFn, std::string*)>("bambu_network_start_publish");
+        auto a = lookup_agent();
+        if (!f || !a) return not_supported(method);
+        const auto job_id = payload.value("client_job_id", 0LL);
+        const auto params = JsonRuntime::publish_params_from_json(payload.value("params", nlohmann::json::object()));
+        auto job = std::make_shared<HostJobState>();
+        job->job_id = job_id;
+        job->agent_handle = agent_id;
+        job->kind = "start_publish";
+        register_job(job);
+        std::string out;
+        const int ret = f(a, params,
+            [this, job](int status, int code, std::string msg) {
+                queue_event(job->agent_handle, "job.update_status", {{"job_id", job->job_id}, {"kind", job->kind}, {"status", status}, {"code", code}, {"msg", msg}});
+            },
+            [job]() {
+                return job->cancel_requested.load();
+            },
+            &out);
+        unregister_job(job_id);
+        return {{"ok", true}, {"value", ret}, {"job_id", job_id}, {"out", out}};
+    }
     if (method == "net.get_model_publish_url") { auto f = net<int (*)(void*, std::string*)>("bambu_network_get_model_publish_url"); auto a = lookup_agent(); if (!f || !a) return not_supported(method); std::string url; const int ret = f(a, &url); return {{"ok", true}, {"value", ret}, {"url", url}}; }
     if (method == "net.get_model_mall_home_url") { auto f = net<int (*)(void*, std::string*)>("bambu_network_get_model_mall_home_url"); auto a = lookup_agent(); if (!f || !a) return not_supported(method); std::string url; const int ret = f(a, &url); return {{"ok", true}, {"value", ret}, {"url", url}}; }
     if (method == "net.get_model_mall_detail_url") { auto f = net<int (*)(void*, std::string*, std::string)>("bambu_network_get_model_mall_detail_url"); auto a = lookup_agent(); if (!f || !a) return not_supported(method); std::string url; const int ret = f(a, &url, payload.value("id", std::string())); return {{"ok", true}, {"value", ret}, {"url", url}}; }
