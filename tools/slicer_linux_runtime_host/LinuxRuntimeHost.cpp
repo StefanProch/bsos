@@ -153,6 +153,12 @@ void translate_print_params_paths(BBL::PrintParams& p)
     p.dst_file = windows_path_to_wsl(std::move(p.dst_file));
 }
 
+void translate_publish_params_paths(BBL::PublishParams& p)
+{
+    p.project_3mf_file = windows_path_to_wsl(std::move(p.project_3mf_file));
+    p.config_filename = windows_path_to_wsl(std::move(p.config_filename));
+}
+
 
 thread_local std::vector<unsigned char> g_thread_request_binary;
 thread_local std::vector<unsigned char> g_thread_reply_binary;
@@ -1219,7 +1225,8 @@ nlohmann::json LinuxRuntimeHost::handle(const std::string& method, const nlohman
         auto a = lookup_agent();
         if (!f || !a) return not_supported(method);
         const auto job_id = payload.value("client_job_id", 0LL);
-        const auto params = JsonRuntime::publish_params_from_json(payload.value("params", nlohmann::json::object()));
+        auto params = JsonRuntime::publish_params_from_json(payload.value("params", nlohmann::json::object()));
+        translate_publish_params_paths(params);
         auto job = std::make_shared<HostJobState>();
         job->job_id = job_id;
         job->agent_handle = agent_id;
