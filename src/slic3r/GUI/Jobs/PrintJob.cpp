@@ -335,7 +335,7 @@ void PrintJob::process(Ctl &ctl)
             }
         }
 
-        auto svc_context = model_info->metadata_items.find("SvcContext");
+        auto svc_context = model_info->metadata_items.find(BBL_SVC_CONTEXT_TAG);
         if (svc_context != model_info->metadata_items.end())
             params.svc_context = svc_context->second;
     }

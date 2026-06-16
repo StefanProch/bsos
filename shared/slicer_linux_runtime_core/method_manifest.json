@@ -16,6 +16,14 @@
     "notes": "returns runtime version"
   },
   {
+    "symbol": "bambu_network_get_last_error_msg",
+    "exported_name": "bambu_network_get_last_error_msg",
+    "area": "network",
+    "status": "implemented",
+    "stability": "diagnostic",
+    "notes": "returns last Linux runtime bridge error"
+  },
+  {
     "symbol": "bambu_network_create_agent",
     "exported_name": "bambu_network_create_agent",
     "area": "network",

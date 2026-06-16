@@ -475,6 +475,7 @@ private:
     func_build_login_info m_build_login_info{nullptr};
     func_ping_bind m_ping_bind{nullptr};
     func_bind_detect m_bind_detect{nullptr};
+    func_report_consent m_report_consent{nullptr};
     func_set_server_callback m_set_server_callback{nullptr};
     func_bind m_bind{nullptr};
     func_unbind m_unbind{nullptr};
@@ -498,6 +499,11 @@ private:
     func_check_user_task_report m_check_user_task_report{nullptr};
     func_get_user_print_info m_get_user_print_info{nullptr};
     func_get_user_tasks m_get_user_tasks{nullptr};
+    func_get_filament_spools m_get_filament_spools{nullptr};
+    func_create_filament_spool m_create_filament_spool{nullptr};
+    func_update_filament_spool m_update_filament_spool{nullptr};
+    func_delete_filament_spools m_delete_filament_spools{nullptr};
+    func_get_filament_config m_get_filament_config{nullptr};
     func_get_printer_firmware m_get_printer_firmware{nullptr};
     func_get_task_plate_index m_get_task_plate_index{nullptr};
     func_get_user_info m_get_user_info{nullptr};
@@ -507,6 +513,7 @@ private:
     func_query_bind_status m_query_bind_status{nullptr};
     func_modify_printer_name m_modify_printer_name{nullptr};
     func_get_camera_url m_get_camera_url{nullptr};
+    func_get_camera_url_for_golive m_get_camera_url_for_golive{nullptr};
     func_get_design_staffpick m_get_design_staffpick{nullptr};
     func_start_pubilsh m_start_publish{nullptr};
     func_get_model_publish_url m_get_model_publish_url{nullptr};
@@ -527,6 +534,7 @@ private:
     func_get_model_mall_rating_result m_get_model_mall_rating_result{nullptr};
     func_get_mw_user_preference m_get_mw_user_preference{nullptr};
     func_get_mw_user_4ulist m_get_mw_user_4ulist{nullptr};
+    func_get_hms_snapshot m_get_hms_snapshot{nullptr};
 };
 
 } // namespace Slic3r

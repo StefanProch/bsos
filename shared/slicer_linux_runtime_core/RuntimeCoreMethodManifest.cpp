@@ -7,6 +7,7 @@ const std::vector<MethodManifestEntry>& method_manifest()
     static const std::vector<MethodManifestEntry> entries = {
 MethodManifestEntry{"bambu_network_check_debug_consistent", "bambu_network_check_debug_consistent", "network", "implemented", "stable", "local runtime always reports debug consistency"},
 MethodManifestEntry{"bambu_network_get_version", "bambu_network_get_version", "network", "implemented", "stable", "returns runtime version"},
+MethodManifestEntry{"bambu_network_get_last_error_msg", "bambu_network_get_last_error_msg", "network", "implemented", "diagnostic", "returns last Linux runtime bridge error"},
 MethodManifestEntry{"bambu_network_create_agent", "bambu_network_create_agent", "network", "implemented", "stable", "rpc passthrough"},
 MethodManifestEntry{"bambu_network_destroy_agent", "bambu_network_destroy_agent", "network", "implemented", "stable", "rpc passthrough"},
 MethodManifestEntry{"bambu_network_init_log", "bambu_network_init_log", "network", "implemented", "stable", "rpc passthrough"},
