@@ -288,8 +288,19 @@ function build_slicer() {
                 "libresolv.so.2"
                 "libnss_dns.so.2"
                 "libnss_files.so.2"
+                "libstdc++.so.6"
+                "libgcc_s.so.1"
+                "libz.so.1"
             )
             mkdir -p "$runtime_dst"
+            rm -f \
+                "$runtime_dst/libbambu_networking.so" \
+                "$runtime_dst/libBambuSource.so" \
+                "$runtime_dst/liblive555.so" \
+                "$runtime_dst/libagora_rtc_sdk.so" \
+                "$runtime_dst/libagora-fdkaac.so" \
+                "$runtime_dst/linux_component_manifest.json" \
+                "$runtime_dst/network_plugins.json"
             for runtime_file in "${runtime_required[@]}"; do
                 if [ ! -f "$runtime_src/$runtime_file" ]; then
                     echo "Missing macOS Linux runtime file: $runtime_src/$runtime_file"
@@ -297,7 +308,19 @@ function build_slicer() {
                 fi
                 cp -f "$runtime_src/$runtime_file" "$runtime_dst/$runtime_file"
             done
-            find "$runtime_src" -maxdepth 1 -type f \( -name '*.so' -o -name '*.so.*' \) -exec cp -f {} "$runtime_dst/" \;
+            find "$runtime_src" -maxdepth 1 -type f \( -name '*.so' -o -name '*.so.*' \) \
+                ! -name 'libbambu_networking.so' \
+                ! -name 'libBambuSource.so' \
+                ! -name 'liblive555.so' \
+                ! -name 'libagora_rtc_sdk.so' \
+                ! -name 'libagora-fdkaac.so' \
+                -exec cp -f {} "$runtime_dst/" \;
+
+            cp -f "$PROJECT_DIR/tools/slicer_linux_runtime_host/slicer-linux-runtime-host-wrapper" "$runtime_dst/slicer-linux-runtime-host-wrapper"
+            cp -f "$PROJECT_DIR/tools/slicer_linux_runtime/macos/install_runtime_macos.sh" "$runtime_dst/install_runtime_macos.sh"
+            cp -f "$PROJECT_DIR/tools/slicer_linux_runtime/macos/verify_runtime_macos.sh" "$runtime_dst/verify_runtime_macos.sh"
+            cp -f "$PROJECT_DIR/tools/slicer_linux_runtime/macos/slicer_linux_runtime_lima_instance.txt" "$runtime_dst/slicer_linux_runtime_lima_instance.txt"
+
             chmod 755 \
                 "$runtime_dst/slicer-linux-runtime-host-wrapper" \
                 "$runtime_dst/install_runtime_macos.sh" \

@@ -24085,6 +24085,8 @@ msgstr ""
 "Sabíeu que quan imprimiu materials propensos a deformar-se, com ara l'ABS, "
 "augmentar adequadament la temperatura del llit pot reduir la probabilitat de "
 "deformació?"
+msgid "Welcome to BambuStudio with OrcaSlicer changes"
+msgstr "Welcome to BambuStudio with OrcaSlicer changes"
 
 #~ msgid ""
 #~ "The Wipe option is not available when using the Firmware Retraction "

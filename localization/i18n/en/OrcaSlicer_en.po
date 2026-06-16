@@ -20986,6 +20986,8 @@ msgstr ""
 "Did you know that when printing materials that are prone to warping such as "
 "ABS, appropriately increasing the heatbed temperature can reduce the "
 "probability of warping?"
+msgid "Welcome to BambuStudio with OrcaSlicer changes"
+msgstr "Welcome to BambuStudio with OrcaSlicer changes"
 
 #~ msgid ""
 #~ "The Wipe option is not available when using the Firmware Retraction "

@@ -60,8 +60,9 @@ LOCAL_LIMA_ROOT="$APP_SUPPORT_DIR/lima"
 LOCAL_LIMA_BIN="$LOCAL_LIMA_ROOT/bin"
 RUNTIME_DIR="${SLICER_LINUX_RUNTIME_MAC_RUNTIME_DIR:-$APP_SUPPORT_DIR/runtime}"
 LOG_DIR="$APP_SUPPORT_DIR/logs"
-INSTALL_VERSION="SLICER-LINUX-RUNTIME-MAC-0.7"
+INSTALL_VERSION="SLICER-LINUX-RUNTIME-MAC-0.13"
 INSTALL_VERSION_FILE="$APP_SUPPORT_DIR/install_version.txt"
+PROBE_MARKER_FILE="$APP_SUPPORT_DIR/component_probe_marker.txt"
 mkdir -p "$APP_SUPPORT_DIR" "$LOCAL_LIMA_ROOT" "$RUNTIME_DIR" "$LOG_DIR"
 
 shell_quote() {
@@ -287,6 +288,9 @@ select_lima_mode() {
             LIMA_CREATE_ARGS+=(--vm-type=qemu --arch=x86_64 --mount-type=9p)
         fi
     fi
+    if [[ -d /var/folders ]]; then
+        LIMA_CREATE_ARGS+=(--mount=/var/folders:w)
+    fi
 }
 
 ensure_qemu_if_needed() {
@@ -305,7 +309,7 @@ ensure_qemu_if_needed() {
         return 0
     fi
 
-    echo "qemu-system-x86_64 not found; install QEMU or use macOS 13+ Apple Silicon Rosetta mode" >&2
+    echo "qemu-system-x86_64 not found; install QEMU and retry" >&2
     return 1
 }
 
@@ -363,6 +367,9 @@ ensure_additional_guestagents_if_needed() {
 select_qemu_mode() {
     LIMA_MODE="qemu-x86_64"
     LIMA_CREATE_ARGS=(start "--name=${INSTANCE}" --tty=false --mount-writable --containerd=none --vm-type=qemu --arch=x86_64 --mount-type=9p)
+    if [[ -d /var/folders ]]; then
+        LIMA_CREATE_ARGS+=(--mount=/var/folders:w)
+    fi
 }
 
 ensure_lima_installed() {
@@ -457,6 +464,9 @@ copy_runtime_payload() {
         libresolv.so.2
         libnss_dns.so.2
         libnss_files.so.2
+        libstdc++.so.6
+        libgcc_s.so.1
+        libz.so.1
     )
 
     for file in "${required_files[@]}"; do
@@ -470,6 +480,9 @@ copy_runtime_payload() {
     check_optional_pair "$cache_dir"
 
     mkdir -p "$dst_dir"
+    if { [[ ! -f "$src_dir/libbambu_networking.so" || ! -f "$src_dir/libBambuSource.so" ]]; } && { [[ -z "$cache_dir" || ! -f "$cache_dir/libbambu_networking.so" || ! -f "$cache_dir/libBambuSource.so" ]]; }; then
+        rm -f "$dst_dir/libbambu_networking.so" "$dst_dir/libBambuSource.so" "$dst_dir/linux_component_manifest.json" "$PROBE_MARKER_FILE"
+    fi
     copy_payload_files_from_dir "$src_dir" "$dst_dir"
     if [[ -n "$cache_dir" && "$cache_dir" != "$src_dir" ]]; then
         copy_payload_files_from_dir "$cache_dir" "$dst_dir"
@@ -532,6 +545,19 @@ linux_component_package_available() {
     [[ -f "$RUNTIME_DIR/libbambu_networking.so" && -f "$RUNTIME_DIR/libBambuSource.so" ]]
 }
 
+component_probe_marker_value() {
+    linux_component_package_available || return 1
+    local mode
+    mode="${LIMA_MODE:-$(trim_file "$APP_SUPPORT_DIR/lima_mode.txt" || true)}"
+    {
+        printf 'mode=%s\n' "$mode"
+        shasum -a 256 "$RUNTIME_DIR/libbambu_networking.so" "$RUNTIME_DIR/libBambuSource.so"
+        if [[ -f "$RUNTIME_DIR/linux_component_manifest.json" ]]; then
+            shasum -a 256 "$RUNTIME_DIR/linux_component_manifest.json"
+        fi
+    } | shasum -a 256 | awk '{print $1}'
+}
+
 INSTANCE="${SLICER_LINUX_RUNTIME_MAC_LIMA_INSTANCE:-}"
 if [[ -z "$INSTANCE" ]]; then
     INSTANCE=$(trim_file "$COMPONENT_DIR/slicer_linux_runtime_lima_instance.txt" || true)
@@ -556,7 +582,13 @@ try_current_lima_mode() {
     printf '%s\n' "$LIMA_MODE" > "$APP_SUPPORT_DIR/lima_mode.txt"
     if linux_component_package_available; then
         probe_linux_payload >> "$LOG_DIR/install-probe.log" 2>&1
+        local marker
+        marker=$(component_probe_marker_value || true)
+        if [[ -n "$marker" ]]; then
+            printf '%s\n' "$marker" > "$PROBE_MARKER_FILE"
+        fi
     else
+        rm -f "$PROBE_MARKER_FILE"
         echo "optional linux component not present; Lima runtime start verified without plugin probe" >> "$LOG_DIR/install-probe.log"
     fi
 }
@@ -572,11 +604,14 @@ try_qemu_fallback() {
     try_current_lima_mode
 }
 
-copy_runtime_payload "$COMPONENT_DIR" "$RUNTIME_DIR" "$COMPONENT_CACHE_DIR"
-select_lima_mode
 if [[ ! -f "$INSTALL_VERSION_FILE" || "$(trim_file "$INSTALL_VERSION_FILE" || true)" != "$INSTALL_VERSION" ]]; then
     REPLACE_EXISTING=1
 fi
+if [[ "$REPLACE_EXISTING" -eq 1 ]]; then
+    rm -rf "$RUNTIME_DIR"
+fi
+copy_runtime_payload "$COMPONENT_DIR" "$RUNTIME_DIR" "$COMPONENT_CACHE_DIR"
+select_lima_mode
 if [[ -f "$APP_SUPPORT_DIR/lima_mode.txt" && "$(trim_file "$APP_SUPPORT_DIR/lima_mode.txt" || true)" != "$LIMA_MODE" ]]; then
     REPLACE_EXISTING=1
 fi
@@ -586,15 +621,23 @@ ensure_additional_guestagents_if_needed
 maybe_install_rosetta
 
 if ! try_current_lima_mode; then
-    if [[ -n "${SLICER_LINUX_RUNTIME_MAC_ALLOW_QEMU_FALLBACK:-}" && "$LIMA_MODE" == vz-* ]]; then
-        if ! try_qemu_fallback; then
+    case "$LIMA_MODE" in
+        vz-*)
+            if [[ -z "${SLICER_LINUX_RUNTIME_MAC_DISABLE_QEMU_FALLBACK:-}" ]]; then
+                if ! try_qemu_fallback; then
+                    echo "macOS Lima runtime probe failed; see $LOG_DIR/install-probe.log" >&2
+                    exit 1
+                fi
+            else
+                echo "macOS Lima runtime probe failed; see $LOG_DIR/install-probe.log" >&2
+                exit 1
+            fi
+            ;;
+        *)
             echo "macOS Lima runtime probe failed; see $LOG_DIR/install-probe.log" >&2
             exit 1
-        fi
-    else
-        echo "macOS Lima runtime probe failed; see $LOG_DIR/install-probe.log" >&2
-        exit 1
-    fi
+            ;;
+    esac
 fi
 
 printf '%s\n' "$INSTALL_VERSION" > "$INSTALL_VERSION_FILE"

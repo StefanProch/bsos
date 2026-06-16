@@ -23417,6 +23417,8 @@ msgstr ""
 "Zamezte kroucení\n"
 "Víte, že při tisku materiálů náchylných ke kroucení, jako je ABS, může "
 "vhodné zvýšení teploty vyhřívané desky snížit pravděpodobnost kroucení?"
+msgid "Welcome to BambuStudio with OrcaSlicer changes"
+msgstr "Welcome to BambuStudio with OrcaSlicer changes"
 
 #~ msgid ""
 #~ "The Wipe option is not available when using the Firmware Retraction "

@@ -63,8 +63,9 @@ COMPONENT_CACHE_DIR=$(normalize_component_cache_dir "$COMPONENT_CACHE_DIR")
 APP_SUPPORT_DIR="$HOME/Library/Application Support/BambuStudio_OrcaSlicer/slicer-linux-runtime"
 RUNTIME_DIR="${SLICER_LINUX_RUNTIME_MAC_RUNTIME_DIR:-$APP_SUPPORT_DIR/runtime}"
 LOG_DIR="$APP_SUPPORT_DIR/logs"
-INSTALL_VERSION="SLICER-LINUX-RUNTIME-MAC-0.7"
+INSTALL_VERSION="SLICER-LINUX-RUNTIME-MAC-0.13"
 INSTALL_VERSION_FILE="$APP_SUPPORT_DIR/install_version.txt"
+PROBE_MARKER_FILE="$APP_SUPPORT_DIR/component_probe_marker.txt"
 mkdir -p "$APP_SUPPORT_DIR" "$LOG_DIR"
 
 shell_quote() {
@@ -162,6 +163,9 @@ sync_payload_files_from_dir() {
 
 sync_runtime_payload() {
     mkdir -p "$RUNTIME_DIR"
+    if { [[ ! -f "$COMPONENT_DIR/libbambu_networking.so" || ! -f "$COMPONENT_DIR/libBambuSource.so" ]]; } && { [[ -z "$COMPONENT_CACHE_DIR" || ! -f "$COMPONENT_CACHE_DIR/libbambu_networking.so" || ! -f "$COMPONENT_CACHE_DIR/libBambuSource.so" ]]; }; then
+        rm -f "$RUNTIME_DIR/libbambu_networking.so" "$RUNTIME_DIR/libBambuSource.so" "$RUNTIME_DIR/linux_component_manifest.json" "$PROBE_MARKER_FILE"
+    fi
     sync_payload_files_from_dir "$COMPONENT_DIR"
     if [[ -n "$COMPONENT_CACHE_DIR" && "$COMPONENT_CACHE_DIR" != "$COMPONENT_DIR" ]]; then
         sync_payload_files_from_dir "$COMPONENT_CACHE_DIR"
@@ -175,6 +179,19 @@ probe_linux_payload() {
     local cmd
     cmd="export SLICER_LINUX_RUNTIME_COMPONENT_DIR=$(shell_quote "$RUNTIME_DIR"); export SLICER_LINUX_RUNTIME_COMPONENT_SO=$(shell_quote "$RUNTIME_DIR/libbambu_networking.so"); export SLICER_LINUX_RUNTIME_SOURCE_SO=$(shell_quote "$RUNTIME_DIR/libBambuSource.so"); export SLICER_LINUX_RUNTIME_MEDIA_SO=$(shell_quote "$RUNTIME_DIR/liblive555.so"); export SLICER_LINUX_RUNTIME_PROBE_LOG_DIR=$(shell_quote "$LOG_DIR"); export SLICER_LINUX_RUNTIME_COUNTRY_CODE=PL; unset LD_LIBRARY_PATH; if [ -f $(shell_quote "$RUNTIME_DIR/ca-certificates.crt") ]; then export SSL_CERT_FILE=$(shell_quote "$RUNTIME_DIR/ca-certificates.crt"); export CURL_CA_BUNDLE=$(shell_quote "$RUNTIME_DIR/ca-certificates.crt"); fi; exec /bin/sh $(shell_quote "$RUNTIME_DIR/slicer_linux_runtime_host") --probe-load"
     "$LIMACTL" shell "$INSTANCE" -- /bin/sh -lc "$cmd"
+}
+
+component_probe_marker_value() {
+    [[ -f "$RUNTIME_DIR/libbambu_networking.so" && -f "$RUNTIME_DIR/libBambuSource.so" ]] || return 1
+    local mode
+    mode=$(trim_file "$APP_SUPPORT_DIR/lima_mode.txt" || true)
+    {
+        printf 'mode=%s\n' "$mode"
+        shasum -a 256 "$RUNTIME_DIR/libbambu_networking.so" "$RUNTIME_DIR/libBambuSource.so"
+        if [[ -f "$RUNTIME_DIR/linux_component_manifest.json" ]]; then
+            shasum -a 256 "$RUNTIME_DIR/linux_component_manifest.json"
+        fi
+    } | shasum -a 256 | awk '{print $1}'
 }
 
 if [[ ! -f "$INSTALL_VERSION_FILE" || "$(trim_file "$INSTALL_VERSION_FILE" || true)" != "$INSTALL_VERSION" ]]; then
@@ -198,6 +215,9 @@ require_file "$COMPONENT_DIR/libm.so.6" "libm.so.6"
 require_file "$COMPONENT_DIR/libresolv.so.2" "libresolv.so.2"
 require_file "$COMPONENT_DIR/libnss_dns.so.2" "libnss_dns.so.2"
 require_file "$COMPONENT_DIR/libnss_files.so.2" "libnss_files.so.2"
+require_file "$COMPONENT_DIR/libstdc++.so.6" "libstdc++.so.6"
+require_file "$COMPONENT_DIR/libgcc_s.so.1" "libgcc_s.so.1"
+require_file "$COMPONENT_DIR/libz.so.1" "libz.so.1"
 
 sync_runtime_payload
 
@@ -230,6 +250,9 @@ require_file "$RUNTIME_DIR/libm.so.6" "runtime/libm.so.6"
 require_file "$RUNTIME_DIR/libresolv.so.2" "runtime/libresolv.so.2"
 require_file "$RUNTIME_DIR/libnss_dns.so.2" "runtime/libnss_dns.so.2"
 require_file "$RUNTIME_DIR/libnss_files.so.2" "runtime/libnss_files.so.2"
+require_file "$RUNTIME_DIR/libstdc++.so.6" "runtime/libstdc++.so.6"
+require_file "$RUNTIME_DIR/libgcc_s.so.1" "runtime/libgcc_s.so.1"
+require_file "$RUNTIME_DIR/libz.so.1" "runtime/libz.so.1"
 
 compare_copied_payload
 
@@ -253,13 +276,21 @@ if ! "$LIMACTL" shell "$INSTANCE" -- /usr/bin/env true >/dev/null 2>&1; then
     exit 1
 fi
 
-if [[ "$SKIP_PROBE" -eq 0 && "$COMPONENT_AVAILABLE" -eq 1 ]]; then
-    if ! probe_linux_payload >> "$LOG_DIR/verify-probe.log" 2>&1; then
-        echo "macOS Lima runtime probe failed" >&2
-        echo "log: $LOG_DIR/verify-probe.log" >&2
-        exit 1
+if [[ "$COMPONENT_AVAILABLE" -eq 1 ]]; then
+    marker=$(component_probe_marker_value || true)
+    current_marker=$(trim_file "$PROBE_MARKER_FILE" || true)
+    if [[ "$SKIP_PROBE" -eq 0 || -z "$marker" || "$current_marker" != "$marker" ]]; then
+        if ! probe_linux_payload >> "$LOG_DIR/verify-probe.log" 2>&1; then
+            echo "macOS Lima runtime probe failed" >&2
+            echo "log: $LOG_DIR/verify-probe.log" >&2
+            exit 1
+        fi
+        if [[ -n "$marker" ]]; then
+            printf '%s\n' "$marker" > "$PROBE_MARKER_FILE"
+        fi
     fi
 elif [[ "$COMPONENT_AVAILABLE" -eq 0 ]]; then
+    rm -f "$PROBE_MARKER_FILE"
     echo "optional linux component not present; Lima runtime verified without plugin probe"
 fi
 

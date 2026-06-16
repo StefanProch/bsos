@@ -2516,6 +2516,7 @@ static bool prepare_windows_slicer_linux_runtime(const boost::filesystem::path& 
                                                 const boost::filesystem::path& component_cache_dir);
 static bool prepare_macos_slicer_linux_runtime(const boost::filesystem::path& component_folder,
                                               const boost::filesystem::path& component_cache_dir);
+void copy_local_runtime_files(const boost::filesystem::path& component_folder);
 
 bool GUI_App::on_init_inner()
 {
@@ -3377,7 +3378,10 @@ bool slicer_linux_runtime_ready(const boost::filesystem::path& component_folder,
         std::string("libm.so.6"),
         std::string("libresolv.so.2"),
         std::string("libnss_dns.so.2"),
-        std::string("libnss_files.so.2")
+        std::string("libnss_files.so.2"),
+        std::string("libstdc++.so.6"),
+        std::string("libgcc_s.so.1"),
+        std::string("libz.so.1")
     };
 #else
     const std::string required_files[] = {
@@ -3449,6 +3453,19 @@ bool slicer_linux_runtime_ready(const boost::filesystem::path& component_folder,
     return true;
 }
 
+static bool local_runtime_helper_copy_allowed(const std::string& file_name)
+{
+    if (file_name == Slic3r::SlicerLinuxRuntime::linux_component_library_name() ||
+        file_name == Slic3r::SlicerLinuxRuntime::linux_source_library_name() ||
+        file_name == Slic3r::SlicerLinuxRuntime::linux_component_manifest_file_name() ||
+        file_name == "liblive555.so" ||
+        file_name == "libagora_rtc_sdk.so" ||
+        file_name == "libagora-fdkaac.so" ||
+        file_name == "network_plugins.json")
+        return false;
+    return true;
+}
+
 void copy_runtime_file_if_exists(const boost::filesystem::path& src_dir,
                                           const boost::filesystem::path& dst_dir,
                                           const std::string& file_name)
@@ -3463,6 +3480,20 @@ void copy_runtime_file_if_exists(const boost::filesystem::path& src_dir,
         return;
 
     boost::filesystem::create_directories(dst.parent_path());
+
+    if (boost::filesystem::exists(dst)) {
+        boost::system::error_code eq_ec;
+        if (boost::filesystem::equivalent(src, dst, eq_ec) && !eq_ec)
+            return;
+
+        boost::system::error_code rm_ec;
+        boost::filesystem::remove(dst, rm_ec);
+        if (rm_ec) {
+            BOOST_LOG_TRIVIAL(error) << "[copy_network_if_available] remove stale runtime file failed: "
+                                     << dst.string() << ", err=" << rm_ec.message();
+            return;
+        }
+    }
 
     std::string error_message;
     CopyFileResult cfr = copy_file(src.string(), dst.string(), error_message, false);
@@ -3523,6 +3554,8 @@ void copy_local_runtime_files(const boost::filesystem::path& component_folder)
                 const std::string file_name = dir_entry.path().filename().string();
                 if (!Slic3r::SlicerLinuxRuntime::is_overlay_runtime_filename(file_name))
                     continue;
+                if (!local_runtime_helper_copy_allowed(file_name))
+                    continue;
                 copy_runtime_file_if_exists(candidate_dir, component_folder, file_name);
             }
         } catch (...) {}
@@ -3574,6 +3607,18 @@ void GUI_App::copy_network_if_available()
     std::string error_message;
 
     auto copy_one = [&](const boost::filesystem::path& src, const boost::filesystem::path& dst) -> bool {
+        boost::filesystem::create_directories(dst.parent_path());
+
+        if (boost::filesystem::exists(dst)) {
+            boost::system::error_code rm_ec;
+            boost::filesystem::remove(dst, rm_ec);
+            if (rm_ec) {
+                BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << ": Removing stale file failed: "
+                                         << dst.string() << ", err=" << rm_ec.message();
+                return false;
+            }
+        }
+
         CopyFileResult cfr = copy_file(src.string(), dst.string(), error_message, false);
         if (cfr != CopyFileResult::SUCCESS) {
             BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << ": Copying failed(" << cfr << "): " << error_message;

@@ -38,12 +38,6 @@ bool RpcClient::start_locked()
     if (m_proc && m_proc->child.running())
         return true;
 
-    if (m_reader.joinable()) {
-        m_state_mutex.unlock();
-        m_reader.join();
-        m_state_mutex.lock();
-    }
-
     try {
         auto spec = build_default_launch_spec();
         if (spec.argv.empty()) {
@@ -102,6 +96,8 @@ void RpcClient::stop()
     }
 
     if (proc) {
+        try { proc->in.pipe().close(); } catch (...) {}
+        try { proc->out.pipe().close(); } catch (...) {}
         try {
             if (proc->child.running())
                 proc->child.terminate();
@@ -124,7 +120,13 @@ void RpcClient::stop()
 bool RpcClient::ensure_started()
 {
     {
-        std::lock_guard<std::mutex> lock(m_state_mutex);
+        std::unique_lock<std::mutex> lock(m_state_mutex);
+        if (m_reader.joinable() && (!m_proc || !m_proc->child.running())) {
+            std::thread stale = std::move(m_reader);
+            lock.unlock();
+            stale.join();
+            lock.lock();
+        }
         if (!start_locked())
             return false;
     }

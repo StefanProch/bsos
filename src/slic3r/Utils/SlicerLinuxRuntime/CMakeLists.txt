@@ -74,7 +74,6 @@ if (UNIX AND NOT APPLE AND EXISTS "${SLICER_LINUX_RUNTIME_LINUX_HOST_DIR}/main.c
             target_link_libraries(${target_name} PRIVATE nlohmann_json::nlohmann_json)
         endif()
         target_link_libraries(${target_name} PRIVATE boost_headeronly ${CMAKE_DL_LIBS} OpenSSL::Crypto)
-        target_link_options(${target_name} PRIVATE -static-libstdc++ -static-libgcc)
         set_target_properties(${target_name} PROPERTIES
             RUNTIME_OUTPUT_DIRECTORY "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}"
             BUILD_WITH_INSTALL_RPATH TRUE
@@ -112,6 +111,9 @@ if (APPLE)
         libresolv.so.2
         libnss_dns.so.2
         libnss_files.so.2
+        libstdc++.so.6
+        libgcc_s.so.1
+        libz.so.1
         ca-certificates.crt
         slicer_base64.cer
     )

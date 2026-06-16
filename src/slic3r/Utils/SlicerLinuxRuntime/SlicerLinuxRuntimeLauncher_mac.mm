@@ -138,7 +138,10 @@ std::string first_missing_runtime_file(const std::filesystem::path& component_di
         std::string("libm.so.6"),
         std::string("libresolv.so.2"),
         std::string("libnss_dns.so.2"),
-        std::string("libnss_files.so.2")
+        std::string("libnss_files.so.2"),
+        std::string("libstdc++.so.6"),
+        std::string("libgcc_s.so.1"),
+        std::string("libz.so.1")
     };
 
     for (const std::string& name : runtime_required_files) {
@@ -261,6 +264,7 @@ LaunchSpec build_default_launch_spec()
         {"SLICER_LINUX_RUNTIME_COMPONENT_SO", (runtime_dir_path / linux_component_library_name()).string()},
         {"SLICER_LINUX_RUNTIME_SOURCE_SO", (runtime_dir_path / linux_source_library_name()).string()},
         {"SLICER_LINUX_RUNTIME_REQUIRE_LINUX_GUEST", "1"},
+        {"SLICER_LINUX_RUNTIME_EXPECTED_ABI_VERSION", expected_component_abi_version()},
         {"SLICER_LINUX_RUNTIME_MAC_RUNTIME_DIR", runtime_dir_path.string()},
         {"SLICER_LINUX_RUNTIME_MAC_LIMA_INSTANCE", instance}
     };

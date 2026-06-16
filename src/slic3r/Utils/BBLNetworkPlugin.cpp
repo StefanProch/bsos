@@ -61,7 +61,16 @@ bool runtime_component_preflight(const boost::filesystem::path& component_folder
         Slic3r::SlicerLinuxRuntime::mac_host_wrapper_file_name(),
         Slic3r::SlicerLinuxRuntime::mac_runtime_install_script_file_name(),
         Slic3r::SlicerLinuxRuntime::mac_runtime_verify_script_file_name(),
-        Slic3r::SlicerLinuxRuntime::mac_lima_instance_file_name()
+        Slic3r::SlicerLinuxRuntime::mac_lima_instance_file_name(),
+        "ld-linux-x86-64.so.2",
+        "libc.so.6",
+        "libm.so.6",
+        "libresolv.so.2",
+        "libnss_dns.so.2",
+        "libnss_files.so.2",
+        "libstdc++.so.6",
+        "libgcc_s.so.1",
+        "libz.so.1"
     };
 #else
     const std::string platform_required_files[] = {};
@@ -168,13 +177,16 @@ int BBLNetworkPlugin::initialize(bool using_backup, const std::string& version)
     const bool linux_runtime = Slic3r::SlicerLinuxRuntime::enabled();
 
     if (linux_runtime) {
+        const std::string runtime_expected_abi = BAMBU_NETWORK_AGENT_VERSION;
 #if defined(_MSC_VER) || defined(_WIN32)
         _putenv_s("SLICER_LINUX_RUNTIME_COMPONENT_DIR", component_folder.string().c_str());
-        _putenv_s("SLICER_LINUX_RUNTIME_EXPECTED_ABI_VERSION", version.c_str());
+        _putenv_s("SLICER_LINUX_RUNTIME_EXPECTED_ABI_VERSION", runtime_expected_abi.c_str());
 #else
         setenv("SLICER_LINUX_RUNTIME_COMPONENT_DIR", component_folder.string().c_str(), 1);
-        setenv("SLICER_LINUX_RUNTIME_EXPECTED_ABI_VERSION", version.c_str(), 1);
+        setenv("SLICER_LINUX_RUNTIME_EXPECTED_ABI_VERSION", runtime_expected_abi.c_str(), 1);
 #endif
+        BOOST_LOG_TRIVIAL(info) << "BBLNetworkPlugin::initialize: Linux runtime expected ABI=" << runtime_expected_abi
+                                << ", requested plugin version=" << version;
         std::string preflight_reason;
         if (!runtime_component_preflight(component_folder, &preflight_reason)) {
             BOOST_LOG_TRIVIAL(error) << "BBLNetworkPlugin::initialize: Linux runtime preflight failed: " << preflight_reason;
@@ -297,9 +309,23 @@ int BBLNetworkPlugin::initialize(bool using_backup, const std::string& version)
         << ", start_local_print=" << (m_start_local_print ? "loaded" : "null");
 
     if (linux_runtime && loaded_version.empty()) {
+        std::string runtime_error;
+        using get_runtime_last_error_fn = const char* (*)();
+        auto get_runtime_last_error = reinterpret_cast<get_runtime_last_error_fn>(get_function("bambu_network_get_last_error_msg"));
+        if (get_runtime_last_error) {
+            const char* msg = get_runtime_last_error();
+            if (msg && *msg)
+                runtime_error = msg;
+        }
+
+        std::string detail = "Runtime module loaded, but the Linux component handshake did not return a version";
+        if (!runtime_error.empty())
+            detail += ": " + runtime_error;
+
+        BOOST_LOG_TRIVIAL(error) << "BBLNetworkPlugin::initialize: " << detail;
         set_load_error(
             "Linux runtime not ready",
-            "Runtime module loaded, but the Linux component handshake did not return a version",
+            detail,
             library
         );
         unload();

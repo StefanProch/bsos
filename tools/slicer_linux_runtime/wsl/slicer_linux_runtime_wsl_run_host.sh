@@ -193,7 +193,7 @@ ln -s "$TARGET_DIR" "$CURRENT_DIR"
 export SLICER_LINUX_RUNTIME_COMPONENT_DIR="$CURRENT_DIR"
 export SLICER_LINUX_RUNTIME_COMPONENT_SO="$CURRENT_DIR/libbambu_networking.so"
 export SLICER_LINUX_RUNTIME_SOURCE_SO="$CURRENT_DIR/libBambuSource.so"
-export LD_LIBRARY_PATH="$CURRENT_DIR${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+# Keep packaged glibc out of this shell. The host wrapper injects it only for the runtime host.
 if [ -f "$CURRENT_DIR/ca-certificates.crt" ]; then
     export SSL_CERT_FILE="$CURRENT_DIR/ca-certificates.crt"
     export CURL_CA_BUNDLE="$CURRENT_DIR/ca-certificates.crt"
@@ -211,15 +211,6 @@ fi
 
 log "selected_bin=$BIN_PATH"
 log "runtime_files=$(list_runtime_files)"
-
-if command -v ldd >/dev/null 2>&1; then
-    LDD_OUT="$(ldd "$BIN_PATH" 2>&1 || true)"
-    if printf '%s\n' "$LDD_OUT" | grep -q 'not found'; then
-        log "ldd reported missing libraries for $BIN_PATH"
-        printf '%s\n' "$LDD_OUT" >&2
-        exit 127
-    fi
-fi
 
 if [ "$MODE" = "probe" ]; then
     echo "probe_ok runtime_dir=$CURRENT_DIR runtime_hash=$RUNTIME_HASH bin=$BIN_PATH"

@@ -24935,6 +24935,9 @@ msgstr ""
 "plateau chauffant peut réduire la probabilité de déformation?"
 
 #, c-format, boost-format
+msgid "Welcome to BambuStudio with OrcaSlicer changes"
+msgstr "Welcome to BambuStudio with OrcaSlicer changes"
+
 #~ msgid ""
 #~ "Failed to connect to OrcaCloud.\n"
 #~ "Please check your network connectivity\n"
