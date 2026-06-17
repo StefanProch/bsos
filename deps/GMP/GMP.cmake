@@ -60,6 +60,19 @@ else ()
         set(_gmp_build_tgt "") # let it guess
     endif()
 
+
+    set(_gnu_m4_env)
+    if (APPLE)
+        find_program(_GNU_M4_EXECUTABLE NAMES gm4 HINTS /opt/homebrew/opt/m4/bin /usr/local/opt/m4/bin /opt/homebrew/bin /usr/local/bin NO_DEFAULT_PATH)
+        if (NOT _GNU_M4_EXECUTABLE)
+            find_program(_GNU_M4_EXECUTABLE NAMES gm4)
+        endif ()
+        if (_GNU_M4_EXECUTABLE)
+            get_filename_component(_GNU_M4_DIR "${_GNU_M4_EXECUTABLE}" DIRECTORY)
+            set(_gnu_m4_env "M4=${_GNU_M4_EXECUTABLE}" "PATH=${_GNU_M4_DIR}:$ENV{PATH}")
+        endif ()
+    endif ()
+
     set(_cross_compile_arg "")
     if (CMAKE_CROSSCOMPILING)
         # TOOLCHAIN_PREFIX should be defined in the toolchain file
@@ -72,7 +85,7 @@ else ()
         DOWNLOAD_DIR ${DEP_DOWNLOAD_DIR}/GMP
         PATCH_COMMAND git apply ${GMP_DIRECTORY_FLAG} --verbose ${CMAKE_CURRENT_LIST_DIR}/0001-GMP_GCC15.patch
         BUILD_IN_SOURCE ON
-        CONFIGURE_COMMAND  env "CC=${CMAKE_C_COMPILER}" "CXX=${CMAKE_CXX_COMPILER}" "CFLAGS=${_gmp_ccflags}" "CXXFLAGS=${_gmp_ccflags}" "LDFLAGS=${CMAKE_EXE_LINKER_FLAGS}" ./configure ${_cross_compile_arg} --enable-shared=no --enable-cxx=yes --enable-static=yes "--prefix=${DESTDIR}" ${_gmp_build_tgt}
+        CONFIGURE_COMMAND  ${CMAKE_COMMAND} -E env ${_gnu_m4_env} "CC=${CMAKE_C_COMPILER}" "CXX=${CMAKE_CXX_COMPILER}" "CFLAGS=${_gmp_ccflags}" "CXXFLAGS=${_gmp_ccflags}" "LDFLAGS=${CMAKE_EXE_LINKER_FLAGS}" ./configure ${_cross_compile_arg} --enable-shared=no --enable-cxx=yes --enable-static=yes "--prefix=${DESTDIR}" ${_gmp_build_tgt}
         BUILD_COMMAND     make -j
         INSTALL_COMMAND   make install
     )

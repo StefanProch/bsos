@@ -18,6 +18,13 @@
 #include <thread>
 #include <vector>
 
+#if defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
+
 #if defined(__clang__)
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wreturn-type-c-linkage"
@@ -248,6 +255,103 @@ static std::int64_t next_job_id()
     return g_next_job_id.fetch_add(1);
 }
 
+
+#if defined(_WIN32)
+static std::wstring utf8_to_wide(const std::string& value)
+{
+    if (value.empty())
+        return {};
+    const int len = MultiByteToWideChar(CP_UTF8, 0, value.c_str(), static_cast<int>(value.size()), nullptr, 0);
+    if (len <= 0)
+        return {};
+    std::wstring out(static_cast<std::size_t>(len), L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, value.c_str(), static_cast<int>(value.size()), out.data(), len);
+    return out;
+}
+
+static std::string wide_to_utf8(const std::wstring& value)
+{
+    if (value.empty())
+        return {};
+    const int len = WideCharToMultiByte(CP_UTF8, 0, value.c_str(), static_cast<int>(value.size()), nullptr, 0, nullptr, nullptr);
+    if (len <= 0)
+        return {};
+    std::string out(static_cast<std::size_t>(len), '\0');
+    WideCharToMultiByte(CP_UTF8, 0, value.c_str(), static_cast<int>(value.size()), out.data(), len, nullptr, nullptr);
+    return out;
+}
+
+static bool is_windows_drive_path(const std::string& path)
+{
+    if (path.size() < 3)
+        return false;
+    const unsigned char c = static_cast<unsigned char>(path[0]);
+    const bool drive = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z');
+    return drive && path[1] == ':' && (path[2] == '\\' || path[2] == '/');
+}
+
+static std::string normalize_windows_runtime_path(std::string path)
+{
+    if (path.empty())
+        return path;
+
+    if (path.rfind("\\\\?\\", 0) == 0)
+        path.erase(0, 4);
+
+    if (!is_windows_drive_path(path))
+        return path;
+
+    std::wstring wide = utf8_to_wide(path);
+    if (wide.empty())
+        return path;
+
+    DWORD full_needed = GetFullPathNameW(wide.c_str(), 0, nullptr, nullptr);
+    if (full_needed) {
+        std::wstring full(static_cast<std::size_t>(full_needed), L'\0');
+        DWORD written = GetFullPathNameW(wide.c_str(), full_needed, full.data(), nullptr);
+        if (written && written < full_needed) {
+            full.resize(written);
+            wide = std::move(full);
+        }
+    }
+
+    const DWORD long_needed = GetLongPathNameW(wide.c_str(), nullptr, 0);
+    if (long_needed) {
+        std::wstring long_path(static_cast<std::size_t>(long_needed), L'\0');
+        const DWORD written = GetLongPathNameW(wide.c_str(), long_path.data(), long_needed);
+        if (written && written < long_needed) {
+            long_path.resize(written);
+            std::string normalized = wide_to_utf8(long_path);
+            if (!normalized.empty())
+                return normalized;
+        }
+    }
+
+    std::string normalized = wide_to_utf8(wide);
+    return normalized.empty() ? path : normalized;
+}
+#else
+static std::string normalize_windows_runtime_path(std::string path)
+{
+    return path;
+}
+#endif
+
+static BBL::PrintParams normalize_runtime_paths(BBL::PrintParams params)
+{
+    params.filename = normalize_windows_runtime_path(std::move(params.filename));
+    params.config_filename = normalize_windows_runtime_path(std::move(params.config_filename));
+    params.dst_file = normalize_windows_runtime_path(std::move(params.dst_file));
+    return params;
+}
+
+static BBL::PublishParams normalize_runtime_paths(BBL::PublishParams params)
+{
+    params.project_3mf_file = normalize_windows_runtime_path(std::move(params.project_3mf_file));
+    params.config_filename = normalize_windows_runtime_path(std::move(params.config_filename));
+    return params;
+}
+
 static void start_cancel_watch(const std::shared_ptr<RuntimeJobState>& job)
 {
     if (!job || !job->was_cancelled)
@@ -399,6 +503,7 @@ SLICER_LINUX_RUNTIME_EXPORT std::string bambu_network_get_version() { return run
 
 SLICER_LINUX_RUNTIME_EXPORT void* bambu_network_create_agent(std::string log_dir)
 {
+    log_dir = normalize_windows_runtime_path(std::move(log_dir));
     auto* a = as_agent(new_agent(log_dir));
     auto& rpc = RpcClient::instance();
     const auto j = ok_or_error(rpc.invoke_json("net.create_agent", {{"log_dir", log_dir}}));
@@ -438,7 +543,7 @@ SLICER_LINUX_RUNTIME_EXPORT int bambu_network_set_config_dir(void* agent, std::s
 {
     auto* a = require_agent(agent);
     if (!a) return invalid_handle();
-    a->config_dir = std::move(config_dir);
+    a->config_dir = normalize_windows_runtime_path(std::move(config_dir));
     return RpcClient::instance().invoke_int("net.set_config_dir", {{"agent", agent_id(a)}, {"config_dir", a->config_dir}});
 }
 
@@ -446,7 +551,7 @@ SLICER_LINUX_RUNTIME_EXPORT int bambu_network_set_cert_file(void* agent, std::st
 {
     auto* a = require_agent(agent);
     if (!a) return invalid_handle();
-    a->cert_dir = std::move(folder);
+    a->cert_dir = normalize_windows_runtime_path(std::move(folder));
     a->cert_file = std::move(filename);
     return RpcClient::instance().invoke_int("net.set_cert_file", {{"agent", agent_id(a)}, {"folder", a->cert_dir}, {"filename", a->cert_file}});
 }
@@ -570,11 +675,11 @@ SLICER_LINUX_RUNTIME_EXPORT std::string bambu_network_get_bambulab_host(void* ag
 SLICER_LINUX_RUNTIME_EXPORT std::string bambu_network_get_user_selected_machine(void* agent) { auto* a = require_agent(agent); if (!a) return {}; a->selected_machine = RpcClient::instance().invoke_string("net.get_user_selected_machine", {{"agent", agent_id(a)}}); return a->selected_machine; }
 SLICER_LINUX_RUNTIME_EXPORT int bambu_network_set_user_selected_machine(void* agent, std::string dev_id) { auto* a = require_agent(agent); if (!a) return invalid_handle(); a->selected_machine = std::move(dev_id); return RpcClient::instance().invoke_int("net.set_user_selected_machine", {{"agent", agent_id(a)}, {"dev_id", a->selected_machine}}); }
 
-SLICER_LINUX_RUNTIME_EXPORT int bambu_network_start_print(void* agent, PrintParams params, OnUpdateStatusFn update, WasCancelledFn cancel, OnWaitFn wait) { auto* a = require_agent(agent); return invoke_job_with_wait("net.start_print", "print", a, JsonRuntime::to_json(params), std::move(update), std::move(cancel), std::move(wait), nullptr); }
-SLICER_LINUX_RUNTIME_EXPORT int bambu_network_start_local_print_with_record(void* agent, PrintParams params, OnUpdateStatusFn update, WasCancelledFn cancel, OnWaitFn wait) { auto* a = require_agent(agent); return invoke_job_with_wait("net.start_local_print_with_record", "local_print_with_record", a, JsonRuntime::to_json(params), std::move(update), std::move(cancel), std::move(wait), nullptr); }
-SLICER_LINUX_RUNTIME_EXPORT int bambu_network_start_send_gcode_to_sdcard(void* agent, PrintParams params, OnUpdateStatusFn update, WasCancelledFn cancel, OnWaitFn wait) { auto* a = require_agent(agent); return invoke_job_with_wait("net.start_send_gcode_to_sdcard", "send_gcode_to_sdcard", a, JsonRuntime::to_json(params), std::move(update), std::move(cancel), std::move(wait), nullptr); }
-SLICER_LINUX_RUNTIME_EXPORT int bambu_network_start_local_print(void* agent, PrintParams params, OnUpdateStatusFn update, WasCancelledFn cancel) { auto* a = require_agent(agent); return invoke_job_with_wait("net.start_local_print", "local_print", a, JsonRuntime::to_json(params), std::move(update), std::move(cancel), OnWaitFn(), nullptr); }
-SLICER_LINUX_RUNTIME_EXPORT int bambu_network_start_sdcard_print(void* agent, PrintParams params, OnUpdateStatusFn update, WasCancelledFn cancel) { auto* a = require_agent(agent); return invoke_job_with_wait("net.start_sdcard_print", "sdcard_print", a, JsonRuntime::to_json(params), std::move(update), std::move(cancel), OnWaitFn(), nullptr); }
+SLICER_LINUX_RUNTIME_EXPORT int bambu_network_start_print(void* agent, PrintParams params, OnUpdateStatusFn update, WasCancelledFn cancel, OnWaitFn wait) { auto* a = require_agent(agent); return invoke_job_with_wait("net.start_print", "print", a, JsonRuntime::to_json(normalize_runtime_paths(std::move(params))), std::move(update), std::move(cancel), std::move(wait), nullptr); }
+SLICER_LINUX_RUNTIME_EXPORT int bambu_network_start_local_print_with_record(void* agent, PrintParams params, OnUpdateStatusFn update, WasCancelledFn cancel, OnWaitFn wait) { auto* a = require_agent(agent); return invoke_job_with_wait("net.start_local_print_with_record", "local_print_with_record", a, JsonRuntime::to_json(normalize_runtime_paths(std::move(params))), std::move(update), std::move(cancel), std::move(wait), nullptr); }
+SLICER_LINUX_RUNTIME_EXPORT int bambu_network_start_send_gcode_to_sdcard(void* agent, PrintParams params, OnUpdateStatusFn update, WasCancelledFn cancel, OnWaitFn wait) { auto* a = require_agent(agent); return invoke_job_with_wait("net.start_send_gcode_to_sdcard", "send_gcode_to_sdcard", a, JsonRuntime::to_json(normalize_runtime_paths(std::move(params))), std::move(update), std::move(cancel), std::move(wait), nullptr); }
+SLICER_LINUX_RUNTIME_EXPORT int bambu_network_start_local_print(void* agent, PrintParams params, OnUpdateStatusFn update, WasCancelledFn cancel) { auto* a = require_agent(agent); return invoke_job_with_wait("net.start_local_print", "local_print", a, JsonRuntime::to_json(normalize_runtime_paths(std::move(params))), std::move(update), std::move(cancel), OnWaitFn(), nullptr); }
+SLICER_LINUX_RUNTIME_EXPORT int bambu_network_start_sdcard_print(void* agent, PrintParams params, OnUpdateStatusFn update, WasCancelledFn cancel) { auto* a = require_agent(agent); return invoke_job_with_wait("net.start_sdcard_print", "sdcard_print", a, JsonRuntime::to_json(normalize_runtime_paths(std::move(params))), std::move(update), std::move(cancel), OnWaitFn(), nullptr); }
 SLICER_LINUX_RUNTIME_EXPORT int bambu_network_get_user_presets(void* agent, std::map<std::string, std::map<std::string, std::string>>* user_presets) { auto* a = require_agent(agent); if (!a) return invalid_handle(); const auto j = ok_or_error(RpcClient::instance().invoke_json("net.get_user_presets", {{"agent", agent_id(a)}})); if (user_presets && j.contains("user_presets")) json_to_nested_string_map(j["user_presets"], *user_presets); return j.value("value", 0); }
 SLICER_LINUX_RUNTIME_EXPORT std::string bambu_network_request_setting_id(void* agent, std::string name, std::map<std::string, std::string>* values_map, unsigned int* http_code) { auto* a = require_agent(agent); if (!a) return {}; const auto values = clone_string_map(values_map); const auto j = ok_or_error(RpcClient::instance().invoke_json("net.request_setting_id", {{"agent", agent_id(a)}, {"name", name}, {"values", values}})); if (http_code) *http_code = j.value("http_code", 0u); return j.value("setting_id", std::string()); }
 SLICER_LINUX_RUNTIME_EXPORT int bambu_network_put_setting(void* agent, std::string setting_id, std::string name, std::map<std::string, std::string>* values_map, unsigned int* http_code) { auto* a = require_agent(agent); if (!a) return invalid_handle(); const auto values = clone_string_map(values_map); const auto j = ok_or_error(RpcClient::instance().invoke_json("net.put_setting", {{"agent", agent_id(a)}, {"setting_id", setting_id}, {"name", name}, {"values", values}})); if (http_code) *http_code = j.value("http_code", 0u); return j.value("value", 0); }
@@ -603,7 +708,7 @@ SLICER_LINUX_RUNTIME_EXPORT int bambu_network_modify_printer_name(void* agent, s
 SLICER_LINUX_RUNTIME_EXPORT int bambu_network_get_camera_url(void* agent, std::string dev_id, std::function<void(std::string)> callback) { auto* a = require_agent(agent); return invoke_string_callback("net.get_camera_url", a, {{"agent", agent_id(a)}, {"dev_id", dev_id}}, callback); }
 SLICER_LINUX_RUNTIME_EXPORT int bambu_network_get_camera_url_for_golive(void* agent, std::string dev_id, std::string sdev_id, std::function<void(std::string)> callback) { auto* a = require_agent(agent); return invoke_string_callback("net.get_camera_url_for_golive", a, {{"agent", agent_id(a)}, {"dev_id", dev_id}, {"sdev_id", sdev_id}}, callback); }
 SLICER_LINUX_RUNTIME_EXPORT int bambu_network_get_design_staffpick(void* agent, int offset, int limit, std::function<void(std::string)> callback) { auto* a = require_agent(agent); return invoke_string_callback("net.get_design_staffpick", a, {{"agent", agent_id(a)}, {"offset", offset}, {"limit", limit}}, callback); }
-SLICER_LINUX_RUNTIME_EXPORT int bambu_network_start_publish(void* agent, PublishParams params, OnUpdateStatusFn update, WasCancelledFn cancel, std::string* out) { auto* a = require_agent(agent); return invoke_job_with_wait("net.start_publish", "publish", a, JsonRuntime::to_json(params), std::move(update), std::move(cancel), OnWaitFn(), out); }
+SLICER_LINUX_RUNTIME_EXPORT int bambu_network_start_publish(void* agent, PublishParams params, OnUpdateStatusFn update, WasCancelledFn cancel, std::string* out) { auto* a = require_agent(agent); return invoke_job_with_wait("net.start_publish", "publish", a, JsonRuntime::to_json(normalize_runtime_paths(std::move(params))), std::move(update), std::move(cancel), OnWaitFn(), out); }
 SLICER_LINUX_RUNTIME_EXPORT int bambu_network_get_model_publish_url(void* agent, std::string* url) { auto* a = require_agent(agent); if (!a) return invalid_handle(); const auto j = ok_or_error(RpcClient::instance().invoke_json("net.get_model_publish_url", {{"agent", agent_id(a)}})); if (url) *url = j.value("url", std::string()); return j.value("value", 0); }
 SLICER_LINUX_RUNTIME_EXPORT int bambu_network_get_model_mall_home_url(void* agent, std::string* url) { auto* a = require_agent(agent); if (!a) return invalid_handle(); const auto j = ok_or_error(RpcClient::instance().invoke_json("net.get_model_mall_home_url", {{"agent", agent_id(a)}})); if (url) *url = j.value("url", std::string()); return j.value("value", 0); }
 SLICER_LINUX_RUNTIME_EXPORT int bambu_network_get_model_mall_detail_url(void* agent, std::string* url, std::string id) { auto* a = require_agent(agent); if (!a) return invalid_handle(); const auto j = ok_or_error(RpcClient::instance().invoke_json("net.get_model_mall_detail_url", {{"agent", agent_id(a)}, {"id", id}})); if (url) *url = j.value("url", std::string()); return j.value("value", 0); }

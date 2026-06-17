@@ -190,6 +190,7 @@ ln -s "$TARGET_DIR" "$CURRENT_DIR"
 export SLICER_LINUX_RUNTIME_COMPONENT_DIR="$CURRENT_DIR"
 export SLICER_LINUX_RUNTIME_COMPONENT_SO="$CURRENT_DIR/libbambu_networking.so"
 export SLICER_LINUX_RUNTIME_SOURCE_SO="$CURRENT_DIR/libBambuSource.so"
+export SLICER_LINUX_RUNTIME_HOST_LOG_FILE="${SLICER_LINUX_RUNTIME_HOST_LOG_FILE:-$PACKAGE_DIR/slicer_linux_runtime_host.log}"
 # Keep packaged glibc out of this shell. The host wrapper injects it only for the runtime host.
 if [ -f "$CURRENT_DIR/ca-certificates.crt" ]; then
     export SSL_CERT_FILE="$CURRENT_DIR/ca-certificates.crt"

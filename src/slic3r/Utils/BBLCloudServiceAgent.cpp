@@ -1,5 +1,6 @@
 #include "BBLCloudServiceAgent.hpp"
 #include "BBLNetworkPlugin.hpp"
+#include "SlicerLinuxRuntime/SlicerLinuxRuntimeConfig.hpp"
 
 #include <boost/log/trivial.hpp>
 #include "Http.hpp"
@@ -55,17 +56,22 @@ std::map<std::string, std::string> BBLCloudServiceAgent::get_extra_header()
     extra_headers.emplace("X-BBL-Client-Name", "BambuStudio");
 
     extra_headers.emplace("X-BBL-Client-Version", GUI::wxGetApp().get_bbl_client_version());
+
+    if (SlicerLinuxRuntime::enabled() && SlicerLinuxRuntime::use_linux_runtime()) {
+        extra_headers.emplace("X-BBL-OS-Type", SlicerLinuxRuntime::linux_component_package_os_type());
+    } else {
 #if defined(__WINDOWS__)
 #ifdef _M_X64
-    extra_headers.emplace("X-BBL-OS-Type", "windows");
+        extra_headers.emplace("X-BBL-OS-Type", "windows");
 #else
-    extra_headers.emplace("X-BBL-OS-Type", "windows_arm");
+        extra_headers.emplace("X-BBL-OS-Type", "windows_arm");
 #endif
 #elif defined(__APPLE__)
-    extra_headers.emplace("X-BBL-OS-Type", "macos");
+        extra_headers.emplace("X-BBL-OS-Type", "macos");
 #elif defined(__LINUX__)
-    extra_headers.emplace("X-BBL-OS-Type", "linux");
+        extra_headers.emplace("X-BBL-OS-Type", "linux");
 #endif
+    }
 
     int major = 0, minor = 0, micro = 0;
     wxGetOsVersion(&major, &minor, &micro);
