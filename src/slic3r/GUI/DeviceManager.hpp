@@ -623,6 +623,7 @@ public:
 
     // fun2
     bool is_support_print_with_emmc{false};
+    bool is_support_model_internal_storage{false};
 
     bool installed_upgrade_kit{false};
     int  bed_temperature_limit = -1;

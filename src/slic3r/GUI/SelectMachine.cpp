@@ -2552,8 +2552,8 @@ void SelectMachineDialog::on_send_print()
                || m_print_job->sdcard_state == DevStorage::SdcardState::HAS_SDCARD_ABNORMAL)
             : m_print_job->sdcard_state == DevStorage::SdcardState::HAS_SDCARD_NORMAL;
 
-    m_print_job->could_emmc_print = obj_->can_use_emmc_print();
-    if (obj_->is_support_print_with_emmc && !m_print_job->could_emmc_print) {
+    m_print_job->could_emmc_print = m_print_type == PrintFromType::FROM_SDCARD_VIEW ? obj_->is_support_print_with_emmc : obj_->can_use_emmc_print();
+    if (m_print_type == PrintFromType::FROM_NORMAL && obj_->is_support_print_with_emmc && !m_print_job->could_emmc_print) {
         BOOST_LOG_TRIVIAL(info) << "print_job: emmc print disabled by config";
     }
 

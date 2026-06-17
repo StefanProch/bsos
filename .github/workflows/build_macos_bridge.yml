@@ -43,7 +43,7 @@ jobs:
       - name: Configure Slicer Linux runtime host build
         shell: bash
         run: |
-          cmake -S . -B build -G "Ninja Multi-Config" -DORCA_TOOLS=ON
+          cmake -S . -B build -G "Ninja Multi-Config" -DORCA_TOOLS=ON -DBBL_RELEASE_TO_PUBLIC=1 -DBBL_INTERNAL_TESTING=0
 
       - name: Build linux host runtime
         shell: bash
@@ -96,6 +96,13 @@ jobs:
           brew install automake texinfo libtool nasm m4
           command -v nasm
           nasm -v
+          m4_path="$(brew --prefix m4)/bin/m4"
+          if [ ! -x "$m4_path" ]; then
+            m4_path="$(brew --prefix m4)/bin/gm4"
+          fi
+          "$m4_path" --gnu --version
+          echo "M4=$m4_path" >> "$GITHUB_ENV"
+          echo "$(dirname "$m4_path")" >> "$GITHUB_PATH"
           brew list
           mkdir -p "$GITHUB_WORKSPACE/deps/build/arm64"
 
@@ -158,6 +165,13 @@ jobs:
           brew install automake texinfo libtool nasm m4
           command -v nasm
           nasm -v
+          m4_path="$(brew --prefix m4)/bin/m4"
+          if [ ! -x "$m4_path" ]; then
+            m4_path="$(brew --prefix m4)/bin/gm4"
+          fi
+          "$m4_path" --gnu --version
+          echo "M4=$m4_path" >> "$GITHUB_ENV"
+          echo "$(dirname "$m4_path")" >> "$GITHUB_PATH"
           brew list
           mkdir -p "$GITHUB_WORKSPACE/deps/build/x86_64"
 

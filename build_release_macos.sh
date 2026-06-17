@@ -102,25 +102,50 @@ if [ -z "$CMAKE_IGNORE_PREFIX_PATH" ]; then
   export CMAKE_IGNORE_PREFIX_PATH="/opt/local:/usr/local:/opt/homebrew"
 fi
 
-if [ -z "${M4:-}" ]; then
+is_gnu_m4() {
+  [ -n "$1" ] && [ -x "$1" ] && "$1" --gnu --version >/dev/null 2>&1
+}
+
+find_gnu_m4() {
+  local _brew_prefix=""
+  if command -v brew >/dev/null 2>&1; then
+    _brew_prefix="$(brew --prefix m4 2>/dev/null || true)"
+  fi
+
   for _m4 in \
-    /usr/local/opt/m4/bin/gm4 \
+    ${M4:-} \
+    ${_brew_prefix:+$_brew_prefix/bin/m4} \
+    ${_brew_prefix:+$_brew_prefix/bin/gm4} \
+    /opt/homebrew/opt/m4/bin/m4 \
     /opt/homebrew/opt/m4/bin/gm4 \
-    "$(command -v gm4 2>/dev/null || true)" \
-    "$(command -v m4 2>/dev/null || true)"; do
-    if [ -n "$_m4" ] && [ -x "$_m4" ] && "$_m4" --version 2>/dev/null | grep -qi 'GNU M4'; then
-      export M4="$_m4"
-      export PATH="$(dirname "$_m4"):$PATH"
-      break
+    /usr/local/opt/m4/bin/m4 \
+    /usr/local/opt/m4/bin/gm4 \
+    /opt/homebrew/bin/m4 \
+    /opt/homebrew/bin/gm4 \
+    /usr/local/bin/m4 \
+    /usr/local/bin/gm4 \
+    "$(command -v m4 2>/dev/null || true)" \
+    "$(command -v gm4 2>/dev/null || true)"; do
+    if is_gnu_m4 "$_m4"; then
+      printf '%s\n' "$_m4"
+      return 0
     fi
   done
+
+  return 1
+}
+
+if ! is_gnu_m4 "${M4:-}"; then
+  if _found_m4="$(find_gnu_m4)"; then
+    export M4="$_found_m4"
+  else
+    echo "ERROR: GNU m4 not found. Install Homebrew m4 and ensure M4 points to GNU m4."
+    exit 1
+  fi
 fi
 
-if [ -n "${M4:-}" ]; then
-  echo " - M4: $M4"
-else
-  echo "WARNING: GNU m4 not found; GMP x86_64 deps build may fail"
-fi
+export PATH="$(dirname "$M4"):$PATH"
+echo " - M4: $M4"
 
 CMAKE_VERSION=$(cmake --version | head -1 | sed 's/[^0-9]*\([0-9]*\).*/\1/')
 if [ "$CMAKE_VERSION" -ge 4 ] 2>/dev/null; then
@@ -220,6 +245,8 @@ function build_slicer() {
                 cmake "${PROJECT_DIR}" \
                     -G "${SLICER_CMAKE_GENERATOR}" \
                     -DORCA_TOOLS=ON \
+                    -DBBL_RELEASE_TO_PUBLIC=1 \
+                    -DBBL_INTERNAL_TESTING=0 \
                     ${ORCA_UPDATER_SIG_KEY:+-DORCA_UPDATER_SIG_KEY="$ORCA_UPDATER_SIG_KEY"} \
                     ${BUILD_TESTS:+-DBUILD_TESTS=ON} \
                     -DCMAKE_BUILD_TYPE="$BUILD_CONFIG" \

@@ -120,9 +120,12 @@ void PrinterFileSystem::SetFileType(FileType type, std::string const &storage)
         return;
     SelectAll(false);
     assert(m_file_list_cache[std::make_pair(m_file_type, m_file_storage)].empty());
+    bool storage_only_changed = (m_file_type == type && m_file_storage != storage);
     m_file_list.swap(m_file_list_cache[{m_file_type, m_file_storage}]);
     std::swap(m_file_type, type);
     m_file_storage = storage;
+    if (storage_only_changed)
+        m_file_list_cache[{m_file_type, m_file_storage}].clear();
     m_file_list.swap(m_file_list_cache[{m_file_type, m_file_storage}]);
     m_lock_start = m_lock_end = 0;
     BuildGroups();
@@ -991,6 +994,8 @@ void PrinterFileSystem::UpdateFocusThumbnail2(std::shared_ptr<std::vector<File>>
 {
     json req;
     json arr;
+    if (!m_file_storage.empty())
+        req["storage"] = m_file_storage;
     if (type == OldThumbnail) {
         for (auto &file : *files) arr.push_back(file.name);
         req["files"] = arr;
@@ -1506,7 +1511,9 @@ void PrinterFileSystem::CancelRequests2(std::vector<boost::uint32_t> const &seqs
     }
     l.unlock();
     for (auto &c : callbacks) {
+#if !BBL_RELEASE_TO_PUBLIC
         wxLogInfo("PrinterFileSystem::CancelRequests2: %u\n", c.first);
+#endif
         c.second(ERROR_CANCEL, json(), nullptr);
     }
 }
@@ -1568,7 +1575,9 @@ void PrinterFileSystem::RecvMessageThread()
             auto & msg = m_messages.front();
             // OutputDebugStringA(msg.c_str());
             // OutputDebugStringA("\n");
+#if !BBL_RELEASE_TO_PUBLIC
             wxLogInfo("PrinterFileSystem::SendRequest >>>: \n%s\n", wxString::FromUTF8(msg));
+#endif
             l.unlock();
             int n = Bambu_SendMessage(m_session.tunnel, CTRL_TYPE, msg.c_str(), msg.length());
             l.lock();
@@ -1608,7 +1617,9 @@ void PrinterFileSystem::HandleResponse(boost::unique_lock<boost::mutex> &l, Bamb
     json        root;
     // OutputDebugStringA(msg.c_str());
     // OutputDebugStringA("\n");
+#if !BBL_RELEASE_TO_PUBLIC
     wxLogInfo("PrinterFileSystem::HandleResponse <<<: \n%s\n", wxString::FromUTF8(msg));
+#endif
     std::istringstream iss(msg);
     int                cmd    = 0;
     int                seq    = -1;
@@ -1756,6 +1767,8 @@ void PrinterFileSystem::Reconnect(boost::unique_lock<boost::mutex> &l, int resul
             } else if (ret == 1) {
                 m_stopped = true;
                 ret = ERROR_RES_BUSY;
+            } else if (ret == Bambu_would_block) {
+                ret = ERROR_TIME_OUT;
             }
             if (tunnel) {
                 Bambu_Close(tunnel);

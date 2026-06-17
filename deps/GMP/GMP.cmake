@@ -63,14 +63,42 @@ else ()
 
     set(_gnu_m4_env)
     if (APPLE)
-        find_program(_GNU_M4_EXECUTABLE NAMES gm4 HINTS /opt/homebrew/opt/m4/bin /usr/local/opt/m4/bin /opt/homebrew/bin /usr/local/bin NO_DEFAULT_PATH)
-        if (NOT _GNU_M4_EXECUTABLE)
-            find_program(_GNU_M4_EXECUTABLE NAMES gm4)
-        endif ()
-        if (_GNU_M4_EXECUTABLE)
-            get_filename_component(_GNU_M4_DIR "${_GNU_M4_EXECUTABLE}" DIRECTORY)
-            set(_gnu_m4_env "M4=${_GNU_M4_EXECUTABLE}" "PATH=${_GNU_M4_DIR}:$ENV{PATH}")
-        endif ()
+        function(_orcaslicer_find_gnu_m4 _out_exe _out_dir)
+            set(_m4_candidates)
+            if (DEFINED ENV{M4} AND NOT "$ENV{M4}" STREQUAL "")
+                list(APPEND _m4_candidates "$ENV{M4}")
+            endif ()
+            list(APPEND _m4_candidates
+                /opt/homebrew/opt/m4/bin/m4
+                /opt/homebrew/opt/m4/bin/gm4
+                /usr/local/opt/m4/bin/m4
+                /usr/local/opt/m4/bin/gm4
+                /opt/homebrew/bin/m4
+                /opt/homebrew/bin/gm4
+                /usr/local/bin/m4
+                /usr/local/bin/gm4
+            )
+            foreach (_m4_candidate IN LISTS _m4_candidates)
+                if (EXISTS "${_m4_candidate}")
+                    execute_process(
+                        COMMAND "${_m4_candidate}" --gnu --version
+                        RESULT_VARIABLE _m4_result
+                        OUTPUT_QUIET
+                        ERROR_QUIET
+                    )
+                    if (_m4_result EQUAL 0)
+                        get_filename_component(_m4_dir "${_m4_candidate}" DIRECTORY)
+                        set(${_out_exe} "${_m4_candidate}" PARENT_SCOPE)
+                        set(${_out_dir} "${_m4_dir}" PARENT_SCOPE)
+                        return()
+                    endif ()
+                endif ()
+            endforeach ()
+            message(FATAL_ERROR "GNU m4 not found. Install Homebrew m4 and export M4 to its executable path.")
+        endfunction()
+
+        _orcaslicer_find_gnu_m4(_GNU_M4_EXECUTABLE _GNU_M4_DIR)
+        set(_gnu_m4_env "M4=${_GNU_M4_EXECUTABLE}" "PATH=${_GNU_M4_DIR}:$ENV{PATH}")
     endif ()
 
     set(_cross_compile_arg "")

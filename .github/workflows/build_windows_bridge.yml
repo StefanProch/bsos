@@ -43,7 +43,7 @@ jobs:
       - name: Configure Slicer Linux runtime host build
         shell: bash
         run: |
-          cmake -S . -B build -G "Ninja Multi-Config" -DORCA_TOOLS=ON
+          cmake -S . -B build -G "Ninja Multi-Config" -DORCA_TOOLS=ON -DBBL_RELEASE_TO_PUBLIC=1 -DBBL_INTERNAL_TESTING=0
 
       - name: Cache WSL rootfs
         uses: actions/cache@v5
