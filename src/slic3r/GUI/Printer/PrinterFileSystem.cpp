@@ -162,25 +162,29 @@ void PrinterFileSystem::ListAllFiles()
 {
     json req;
     char const * types[] {"timelapse","video", "model" };
-    req["type"] = types[m_file_type];
-    if (!m_file_storage.empty())
-        req["storage"] = m_file_storage;
+    auto request_type = m_file_type;
+    auto request_storage = m_file_storage;
+    req["type"] = types[request_type];
+    if (!request_storage.empty())
+        req["storage"] = request_storage;
     req["api_version"] = 2;
     req["notify"] = "DETAIL";
-    SendRequest<FileList>(LIST_INFO, req, [this, type = m_file_type](json const& resp, FileList & list, auto) -> int {
+    SendRequest<FileList>(LIST_INFO, req, [this, request_type](json const& resp, FileList & list, auto) -> int {
         json files = resp["file_lists"];
         for (auto& f : files) {
             std::string     name = f["name"];
             std::string     path = f.value("path", "");
             time_t          time = f.value("time", 0);
             boost::uint64_t size = f["size"];
-            if (type > F_TIMELAPSE && path.empty()) // Fix old printer that always return timelapses
+            if (request_type > F_TIMELAPSE && path.empty()) // Fix old printer that always return timelapses
                 return FILE_TYPE_ERR;
             File            ff   = {name, path, time, size, 0};
             list.push_back(ff);
         }
         return 0;
-    }, [this, type = m_file_type](int result, FileList list) {
+    }, [this, request_type, request_storage](int result, FileList list) {
+        if (request_type != m_file_type || request_storage != m_file_storage)
+            return 0;
         if (result != 0) {
             m_last_error = result;
             m_status = Status::Failed;
@@ -191,8 +195,6 @@ void PrinterFileSystem::ListAllFiles()
             SendChangedEvent(EVT_FILE_CHANGED);
             return 0;
         }
-        if (type != m_file_type)
-            return 0;
         m_file_list.swap(list);
         for (auto & file : m_file_list)
             file.thumbnail = default_thumbnail;
@@ -1138,10 +1140,10 @@ std::pair<PrinterFileSystem::FileList &, size_t> PrinterFileSystem::FindFile(std
                                m_file_list :
                                m_file_list_cache[type];
     if (index >= file_list.size() || (by_path ? file_list[index].path : file_list[index].name) != name) {
-        auto iter = std::find_if(m_file_list.begin(), file_list.end(),
+        auto iter = std::find_if(file_list.begin(), file_list.end(),
                 [name, by_path](File &f) { return (by_path ? f.path : f.name) == name; });
-        if (iter == m_file_list.end()) return {file_list, -1};
-        index = std::distance(m_file_list.begin(), iter);
+        if (iter == file_list.end()) return {file_list, -1};
+        index = std::distance(file_list.begin(), iter);
     }
     return {file_list, index};
 }
