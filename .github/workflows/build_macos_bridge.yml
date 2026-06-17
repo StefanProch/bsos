@@ -93,7 +93,7 @@ jobs:
       - name: Install mac tools
         shell: bash
         run: |
-          brew install automake texinfo libtool nasm
+          brew install automake texinfo libtool nasm m4
           command -v nasm
           nasm -v
           brew list
@@ -155,7 +155,7 @@ jobs:
       - name: Install mac tools
         shell: bash
         run: |
-          brew install automake texinfo libtool nasm
+          brew install automake texinfo libtool nasm m4
           command -v nasm
           nasm -v
           brew list

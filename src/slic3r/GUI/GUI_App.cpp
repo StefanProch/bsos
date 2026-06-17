@@ -5549,8 +5549,39 @@ void GUI_App::on_user_login_handle(wxCommandEvent &evt)
     DeviceManager* dev = Slic3r::GUI::wxGetApp().getDeviceManager();
     if (!dev) return;
 
-    boost::thread update_thread = boost::thread([dev, provider] {
+    boost::thread update_thread = boost::thread([this, dev, provider] {
         dev->update_user_machine_list_info(provider);
+        CallAfter([this, dev] {
+            if (is_closing() || !dev) return;
+
+            MachineObject* selected = dev->get_selected_machine();
+            if (selected && !selected->is_lan_mode_printer()) return;
+
+            auto cloud_machines = dev->get_my_cloud_machine_list();
+            if (cloud_machines.empty()) return;
+
+            std::string target;
+            if (m_agent) {
+                const std::string last = m_agent->get_user_selected_machine();
+                if (!last.empty() && cloud_machines.find(last) != cloud_machines.end())
+                    target = last;
+            }
+
+            if (target.empty()) {
+                for (const auto& item : cloud_machines) {
+                    if (item.second && item.second->is_online()) {
+                        target = item.first;
+                        break;
+                    }
+                }
+            }
+
+            if (target.empty())
+                target = cloud_machines.begin()->first;
+
+            BOOST_LOG_TRIVIAL(info) << "on_user_login_handle: selecting cloud machine after user print info, dev_id=" << target;
+            dev->set_selected_machine(target);
+        });
     });
 
     if (online_login && (provider == ORCA_CLOUD_PROVIDER || provider == BBL_CLOUD_PROVIDER)) {

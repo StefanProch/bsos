@@ -102,6 +102,26 @@ if [ -z "$CMAKE_IGNORE_PREFIX_PATH" ]; then
   export CMAKE_IGNORE_PREFIX_PATH="/opt/local:/usr/local:/opt/homebrew"
 fi
 
+if [ -z "${M4:-}" ]; then
+  for _m4 in \
+    /usr/local/opt/m4/bin/gm4 \
+    /opt/homebrew/opt/m4/bin/gm4 \
+    "$(command -v gm4 2>/dev/null || true)" \
+    "$(command -v m4 2>/dev/null || true)"; do
+    if [ -n "$_m4" ] && [ -x "$_m4" ] && "$_m4" --version 2>/dev/null | grep -qi 'GNU M4'; then
+      export M4="$_m4"
+      export PATH="$(dirname "$_m4"):$PATH"
+      break
+    fi
+  done
+fi
+
+if [ -n "${M4:-}" ]; then
+  echo " - M4: $M4"
+else
+  echo "WARNING: GNU m4 not found; GMP x86_64 deps build may fail"
+fi
+
 CMAKE_VERSION=$(cmake --version | head -1 | sed 's/[^0-9]*\([0-9]*\).*/\1/')
 if [ "$CMAKE_VERSION" -ge 4 ] 2>/dev/null; then
   export CMAKE_POLICY_VERSION_MINIMUM=3.5
