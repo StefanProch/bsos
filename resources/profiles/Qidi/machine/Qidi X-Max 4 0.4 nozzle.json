@@ -78,6 +78,5 @@
 	"thumbnail_size": [
 		"150x150"
 	],
-	"fan_direction": "left",
-	"use_3mf": "1"
+	"fan_direction": "left"
 }

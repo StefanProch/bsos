@@ -4621,7 +4621,6 @@ struct Plater::priv
     }
 
     void process_validation_warning(StringObjectException const &warning) const;
-    void process_validation_warnings(const std::vector<StringObjectException> &warnings) const;
 
     bool background_processing_enabled() const {
 #ifdef SUPPORT_BACKGROUND_PROCESSING
@@ -7681,7 +7680,7 @@ void Plater::priv::split_object(int obj_idx, bool auto_drop /* = true */)
         };
         bool split_auto_drop = auto_drop;
         if (current_model_object->instances[0]->auto_drop && is_atleast_one_floating()) {
-            MessageDialog dlg(q, _L("Disable Auto-Drop to preserve Z positioning?\n"),
+            MessageDialog dlg(q, _L("Disable Auto-Drop to preserve z positioning?\n"),
                                   _L("Object with floating parts was detected"), wxICON_QUESTION | wxYES_NO);
 
             if (dlg.ShowModal() == wxID_YES)
@@ -7946,14 +7945,6 @@ void Plater::priv::process_validation_warning(StringObjectException const &warni
     }
 }
 
-void Plater::priv::process_validation_warnings(const std::vector<StringObjectException> &warnings) const
-{
-    notification_manager->close_notification_of_type(NotificationType::ValidateWarning);
-    for (const StringObjectException &warning : warnings)
-        if (!warning.string.empty())
-            process_validation_warning(warning);
-}
-
 
 // Update background processing thread from the current config and Model.
 // Returns a bitmask of UpdateBackgroundProcessReturnState.
@@ -8034,14 +8025,14 @@ unsigned int Plater::priv::update_background_process(bool force_validation, bool
         // The state of the Print changed, and it is non-zero. Let's validate it and give the user feedback on errors.
 
         //BBS: add is_warning logic
-        std::vector<StringObjectException> warnings;
+        StringObjectException warning;
         //BBS: refine seq-print logic
         Polygons polygons;
         std::vector<std::pair<Polygon, float>> height_polygons;
-        StringObjectException err = background_process.validate(&warnings, &polygons, &height_polygons);
+        StringObjectException err = background_process.validate(&warning, &polygons, &height_polygons);
         // update string by type
         q->post_process_string_object_exception(err);
-        BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << boost::format(": validate err=%1%, warnings=%2%")%err.string%warnings.size();
+        BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << boost::format(": validate err=%1%, warning=%2%")%err.string%warning.string;
 
         if (err.string.empty()) {
             this->partplate_list.get_curr_plate()->update_apply_result_invalid(false);
@@ -8054,7 +8045,7 @@ unsigned int Plater::priv::update_background_process(bool force_validation, bool
 
             // Pass a warning from validation and either show a notification,
             // or hide the old one.
-            process_validation_warnings(warnings);
+            process_validation_warning(warning);
             if (printer_technology == ptFFF) {
                 view3D->get_canvas3d()->reset_sequential_print_clearance();
                 view3D->get_canvas3d()->set_as_dirty();
@@ -8067,7 +8058,7 @@ unsigned int Plater::priv::update_background_process(bool force_validation, bool
             // Show error as notification.
             notification_manager->push_validate_error_notification(err);
             //also update the warnings
-            process_validation_warnings(warnings);
+            process_validation_warning(warning);
             return_state |= UPDATE_BACKGROUND_PROCESS_INVALID;
             if (printer_technology == ptFFF) {
                 const Print* print = background_process.fff_print();
@@ -16114,8 +16105,17 @@ void Plater::send_gcode_legacy(int plate_idx, Export3mfProgressFn proFn, bool us
     if (upload_job.empty())
         return;
 
-    const auto* use_3mf_opt = physical_printer_config->option<ConfigOptionBool>("use_3mf");
-    use_3mf = use_3mf || (use_3mf_opt != nullptr && use_3mf_opt->value);
+    const auto  host_type_opt = physical_printer_config->option<ConfigOptionEnum<PrintHostType>>("host_type");
+    const auto  host_type     = host_type_opt != nullptr ? host_type_opt->value : htElegooLink;
+    const auto* ff_serial_opt = physical_printer_config->option<ConfigOptionString>("flashforge_serial_number");
+    const auto* ff_code_opt   = physical_printer_config->option<ConfigOptionString>("printhost_apikey");
+    const bool  flashforge_local_api =
+        host_type == htFlashforge &&
+        ff_serial_opt != nullptr && !ff_serial_opt->value.empty() &&
+        ff_code_opt != nullptr && !ff_code_opt->value.empty();
+
+    if (flashforge_local_api)
+        use_3mf = true;
 
     upload_job.upload_data.use_3mf = use_3mf;
 
@@ -17689,14 +17689,14 @@ void Plater::validate_current_plate(bool& model_fits, bool& validate_error)
     if (p->printer_technology == ptFFF) {
         //std::string plater_text = _u8L("An object is laid over the boundary of plate or exceeds the height limit.\n"
         //            "Please solve the problem by moving it totally on or off the plate, and confirming that the height is within the build volume.");;
-        std::vector<StringObjectException> warnings;
+        StringObjectException warning;
         Polygons polygons;
         std::vector<std::pair<Polygon, float>> height_polygons;
         p->background_process.fff_print()->set_check_multi_filaments_compatibility(wxGetApp().app_config->get("enable_high_low_temp_mixed_printing") == "false");
-        StringObjectException err = p->background_process.validate(&warnings, &polygons, &height_polygons);
+        StringObjectException err = p->background_process.validate(&warning, &polygons, &height_polygons);
         // update string by type
         post_process_string_object_exception(err);
-        BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << boost::format(": validate err=%1%, warnings=%2%, model_fits %3%")%err.string%warnings.size() %model_fits;
+        BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << boost::format(": validate err=%1%, warning=%2%, model_fits %3%")%err.string%warning.string %model_fits;
 
         if (err.string.empty()) {
             p->partplate_list.get_curr_plate()->update_apply_result_invalid(false);
@@ -17706,7 +17706,7 @@ void Plater::validate_current_plate(bool& model_fits, bool& validate_error)
 
             // Pass a warning from validation and either show a notification,
             // or hide the old one.
-            p->process_validation_warnings(warnings);
+            p->process_validation_warning(warning);
             p->view3D->get_canvas3d()->reset_sequential_print_clearance();
             p->view3D->get_canvas3d()->set_as_dirty();
             p->view3D->get_canvas3d()->request_extra_frame();
@@ -17716,7 +17716,7 @@ void Plater::validate_current_plate(bool& model_fits, bool& validate_error)
             p->partplate_list.get_curr_plate()->update_apply_result_invalid(true);
             // Show error as notification.
             p->notification_manager->push_validate_error_notification(err);
-            p->process_validation_warnings(warnings);
+            p->process_validation_warning(warning);
             //model_fits = false;
             validate_error = true;
             p->view3D->get_canvas3d()->set_sequential_print_clearance_visible(true);

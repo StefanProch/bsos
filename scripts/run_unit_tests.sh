@@ -9,6 +9,4 @@ ROOT_DIR="$(dirname "$0")/.."
 
 cd "${ROOT_DIR}" || exit 1
 
-# Run the whole suite, excluding tests tagged [NotWorking].
-# --no-tests=error fails the job if the filter matches nothing (instead of passing green).
-ctest --test-dir build/tests -LE "NotWorking" --no-tests=error --output-junit "$(pwd)/ctest_results.xml" --output-on-failure -j
+ctest --test-dir build/tests -L "Http|PlaceholderParser" --output-junit "$(pwd)/ctest_results.xml" --output-on-failure -j

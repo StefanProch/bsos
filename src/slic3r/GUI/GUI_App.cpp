@@ -421,7 +421,7 @@ static void migrate_flatpak_legacy_datadir(const boost::filesystem::path &data_d
     std::cerr << "Migrating Flatpak data dir: " << data_dir_path << std::endl;
 
     std::string legacy_data_dir_str = data_dir_path.string();
-    boost::replace_first(legacy_data_dir_str, "com.orcaslicer.OrcaSlicer", "io.github.softfever.OrcaSlicer");
+    boost::replace_first(legacy_data_dir_str, "com.orcaslicer.OrcaSlicer", "io.github.orcaslicer.OrcaSlicer");
     const fs::path legacy_data_dir(legacy_data_dir_str);
 
     std::cerr << "Legacy Flatpak data dir: " << legacy_data_dir << std::endl;
@@ -487,7 +487,7 @@ static const FileWildcards file_wildcards_by_type[FT_SIZE] = {
     /* FT_OBJ */     { L("OBJ files"),       { ".obj"sv } },
     /* FT_AMF */     { L("AMF files"),       { ".amf"sv, ".zip.amf"sv, ".xml"sv } },
     /* FT_3MF */     { L("3MF files"),       { ".3mf"sv } },
-    /* FT_GCODE_3MF */ {L("G-code 3MF files"), {".gcode.3mf"sv}},
+    /* FT_GCODE_3MF */ {L("Gcode 3MF files"), {".gcode.3mf"sv}},
     /* FT_GCODE */   { L("G-code files"),    { ".gcode"sv} },
 #ifdef __APPLE__
     /* FT_MODEL */
@@ -7046,16 +7046,16 @@ void GUI_App::update_single_bundle(wxCommandEvent& evt)
     });
 }
 
-int GUI_App::sync_bundle(std::string bundle_id, std::string version)
+void GUI_App::sync_bundle(std::string bundle_id, std::string version)
 {
     // if(preset_bundle->bundles.pauseReads.load())
     // {
     //     BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << __LINE__ << "ORCA : Update thread sync_bundle function yielded to main thread. 1";
     //     return; // if the main thread acquires the lock at the start of our operations, we will yield
     // }
-    if (!m_agent || !m_agent->is_user_login()) return 0;
+    if (!m_agent || !m_agent->is_user_login()) return;
     auto orca_agent = std::dynamic_pointer_cast<OrcaCloudServiceAgent>(m_agent->get_cloud_agent());
-    if (!orca_agent) return 0;
+    if (!orca_agent) return;
 
     BOOST_LOG_TRIVIAL(info) << "sync_bundle: checking bundle " << bundle_id << " for updates";
 
@@ -7078,12 +7078,12 @@ int GUI_App::sync_bundle(std::string bundle_id, std::string version)
             BOOST_LOG_TRIVIAL(warning) << "sync_bundle: failed to parse versions for bundle " << bundle_id
                                     << " (local: " << local_version << ", remote: " << remote_version << ")";
             preset_bundle->bundles.ReadUnlock(); // unlock read when fail
-            return -1;
+            return;
         }
         if (remote_version <= local_version) {
             BOOST_LOG_TRIVIAL(info) << "sync_bundle: bundle " << bundle_id << " is up-to-date (version " << local_version << ")";
             preset_bundle->bundles.ReadUnlock(); // unlock read when fail
-            return -1;
+            return;
         }
         BOOST_LOG_TRIVIAL(info) << "sync_bundle: updating bundle " << bundle_id
                                 << " from version " << local_version
@@ -7100,7 +7100,8 @@ int GUI_App::sync_bundle(std::string bundle_id, std::string version)
 
     // if it is an update, we will lock and write
     std::string ver;
-    if (is_update) {
+    if(is_update)
+    {
         preset_bundle->bundles.WriteLock();
         preset_bundle->bundles.m_bundles[bundle_id].update_available = true;
         preset_bundle->bundles.m_bundles[bundle_id].is_subscribed = true;
@@ -7108,13 +7109,8 @@ int GUI_App::sync_bundle(std::string bundle_id, std::string version)
         preset_bundle->bundles.WriteUnlock();
     }
 
-    const bool auto_update = app_config->get_bool("preset_bundle_auto_update");
-
-    if (is_update && !auto_update) {
-        return 1;
-    }
-
-    if (auto_update || is_new) {
+    if(app_config->get_bool("preset_bundle_auto_update") == true || is_new) 
+    {  
         // Fetch the latest bundle data from cloud
         std::map<std::string, std::map<std::string, std::string>> bundle_presets;
         BundleMetadata remote_metadata;
@@ -7122,7 +7118,7 @@ int GUI_App::sync_bundle(std::string bundle_id, std::string version)
 
         if (result != 0) {
             BOOST_LOG_TRIVIAL(warning) << "sync_bundle: failed to fetch bundle " << bundle_id << ", result=" << result;
-            return -1;
+            return;
         }
 
         // Import the updated bundle on the main thread
@@ -7171,9 +7167,8 @@ int GUI_App::sync_bundle(std::string bundle_id, std::string version)
             }
         });
     }
-
-    return 0;
 }
+
 
 void GUI_App::check_bundle_updates()
 {
@@ -7308,7 +7303,6 @@ void GUI_App::start_sync_user_preset(bool with_progress_dlg, const std::string& 
     // BBS
     m_user_sync_token.reset(new int(0));
     if (with_progress_dlg) {
-        m_sync_user_preset_dlg_active = true;
         auto dlg = new ProgressDialog(_L("Loading"), "", 100, this->mainframe, wxPD_AUTO_HIDE | wxPD_APP_MODAL | wxPD_CAN_ABORT);
         dlg->Update(0, _L("Loading user preset"));
         progressFn = [this, dlg](int percent) {
@@ -7320,7 +7314,7 @@ void GUI_App::start_sync_user_preset(bool with_progress_dlg, const std::string& 
             return is_closing() || dlg->WasCanceled() || t.expired();
         };
         finishFn = [this, dlg](bool) {
-            CallAfter([=]{ dlg->Destroy(); m_sync_user_preset_dlg_active = false; });
+            CallAfter([=]{ dlg->Destroy(); });
         };
     }
     else {
@@ -7334,7 +7328,7 @@ void GUI_App::start_sync_user_preset(bool with_progress_dlg, const std::string& 
 
     m_sync_update_thread = Slic3r::create_thread(
         [this, progressFn, cancelFn, finishFn, t = std::weak_ptr<int>(m_user_sync_token), active_provider] {
-            if (!m_agent) { finishFn(false); return; }
+            if (!m_agent) return;
 
             // One-time scan for orphaned .info files left over from offline deletions; queues HTTP DELETEs.
             scan_orphaned_info_files();
@@ -7378,8 +7372,6 @@ void GUI_App::start_sync_user_preset(bool with_progress_dlg, const std::string& 
             std::vector<Preset> presets_to_sync;
             std::vector<std::pair<std::string, std::string>> bundles_to_sync;
             std::unordered_set<std::string> bundles_synced;
-            std::unordered_set<std::string> known_available_updates;
-            bool update_available = false;
             // Sync once immediately, then every 60 seconds.
             while (!t.expired()) {
                 ++tick_tock;
@@ -7491,22 +7483,11 @@ void GUI_App::start_sync_user_preset(bool with_progress_dlg, const std::string& 
                                 // if(!preset_bundle->bundles.pauseReads.load()) // if pause is true we will skip updating this frame altogether
                                 // {   
                                     BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << __LINE__ << "ORCA : Update thread syncing bundles";
-                                    int res = sync_bundle(bundle_entry.first, bundle_entry.second);
-                                    const std::string known_update_key = bundle_entry.first + ":" + bundle_entry.second;
-                                    if (res == 1 && known_available_updates.insert(known_update_key).second)
-                                        update_available = true;
+                                    sync_bundle(bundle_entry.first, bundle_entry.second);
                                 // }
                                 // Small delay between bundle syncs to avoid overwhelming the server
                                 boost::this_thread::sleep_for(boost::chrono::milliseconds(100));
                             
-                        }
-
-                        if (update_available) {
-                            wxGetApp().plater()->get_notification_manager()->push_notification(
-                                NotificationType::CustomNotification,
-                                NotificationManager::NotificationLevel::RegularNotificationLevel,
-                                _L("There is an update available. Open the preset bundle dialog to update it."));
-                            update_available = false;
                         }
                         
                         std::vector<BundleMetadata> to_delete;
@@ -7590,9 +7571,6 @@ void GUI_App::stop_sync_user_preset()
 void GUI_App::restart_sync_user_preset(const std::string& provider)
 {
     const std::string active_provider = resolve_user_preset_provider(m_agent, provider);
-    if (m_sync_user_preset_dlg_active)
-        return;
-
     if (!m_user_sync_token) {
         // No sync running. If a restart helper is already in flight it will
         // start the new sync once the old thread is joined — don't race it.

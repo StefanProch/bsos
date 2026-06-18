@@ -31,7 +31,6 @@
 #include <wx/filefn.h>
 #include <wx/secretstore.h>
 #include <wx/stdpaths.h>
-#include <wx/app.h>
 #include <wx/utils.h>
 
 #if defined(_WIN32)
@@ -480,7 +479,7 @@ int OrcaCloudServiceAgent::set_config_dir(std::string cfg_dir)
     config_dir = cfg_dir;
     wxFileName fallback(wxString::FromUTF8(cfg_dir.c_str()), "orca_refresh_token.sec");
     fallback.Normalize();
-    secret_fallback_path = fallback.GetFullPath().ToStdString();
+    refresh_fallback_path = fallback.GetFullPath().ToStdString();
     return BAMBU_NETWORK_SUCCESS;
 }
 
@@ -498,64 +497,14 @@ int OrcaCloudServiceAgent::set_country_code(std::string code)
     return BAMBU_NETWORK_SUCCESS;
 }
 
-/// Decode a saved user session or a refresh token.
-///
-/// Returns `false` if invalid input, and a re-authentication is required.
-///
-/// If returns `true`, `out_refresh_token` will contain the user refresh token, and `out_session` can be one of two scenarios:
-/// - if `out_session.logged_in` is `true`, then `out_session.refresh_token` and `out_session.user_id` are guaranteed to be present,
-///   and a refresh is not necessarily required until you need to make any network call
-/// - otherwise if `out_session.logged_in` is `false`, you should do a refresh immediately to get the user information before proceed,
-///   otherwise user will be logged out
-static bool parse_stored_secret(const std::string& secret, std::string& out_refresh_token, OrcaCloudServiceAgent::SessionInfo& out_session)
-{
-    out_refresh_token.clear();
-    out_session = OrcaCloudServiceAgent::SessionInfo{};
-
-    try {
-        const json secret_json = json::parse(secret, nullptr, false);
-        if (secret_json.type() != json::value_t::object) {
-            out_refresh_token = secret;
-            return true;
-        }
-
-        OrcaCloudServiceAgent::SessionInfo user_session{};
-        user_session.refresh_token = get_json_string_field(secret_json, "refresh_token");
-        user_session.user_id       = get_json_string_field(secret_json, "user_id");
-        user_session.user_name     = get_json_string_field(secret_json, "username");
-        user_session.user_nickname = get_json_string_field(secret_json, "nickname");
-        user_session.logged_in     = true;
-        if (user_session.refresh_token.empty() || user_session.user_id.empty()) {
-            BOOST_LOG_TRIVIAL(warning) << "OrcaCloudServiceAgent: secret does not contain valid user session, force re-authentication";
-            return false;
-        }
-
-        out_refresh_token = user_session.refresh_token;
-        out_session       = std::move(user_session);
-        return true;
-    } catch (const std::exception&) {
-        BOOST_LOG_TRIVIAL(error) << "OrcaCloudServiceAgent: parse_stored_secret exception, force re-authentication";
-        return false;
-    }
-}
-
 int OrcaCloudServiceAgent::start()
 {
     regenerate_pkce();
 
     // Attempt silent sign-in from stored refresh token
-    std::string stored_secret;
-    if (load_user_secret(stored_secret) && !stored_secret.empty()) {
-        std::string refresh_token;
-        SessionInfo stored_session;
-        if (parse_stored_secret(stored_secret, refresh_token, stored_session)) {
-            if (stored_session.logged_in) {
-                set_user_session(stored_session.access_token, stored_session.user_id, stored_session.user_name,
-                                 stored_session.user_nickname, stored_session.user_avatar, stored_session.refresh_token,
-                                 /*persist=*/false);
-            }
-            refresh_now(refresh_token, "refresh token", stored_session.logged_in);
-        }
+    std::string stored_refresh;
+    if (load_refresh_token(stored_refresh) && !stored_refresh.empty()) {
+        refresh_now(stored_refresh, "refresh token", false);
     }
 
     return BAMBU_NETWORK_SUCCESS;
@@ -1438,10 +1387,10 @@ void OrcaCloudServiceAgent::update_redirect_uri()
 // Auth - Token Persistence
 // ============================================================================
 
-void OrcaCloudServiceAgent::persist_user_secret(const std::string& token)
+void OrcaCloudServiceAgent::persist_refresh_token(const std::string& token)
 {
     if (token.empty()) {
-        clear_user_secret();
+        clear_refresh_token();
         return;
     }
 
@@ -1451,7 +1400,7 @@ void OrcaCloudServiceAgent::persist_user_secret(const std::string& token)
         // Use encrypted file only
         auto key = sha256_bytes(get_encryption_key());
         if (key.empty()) {
-            BOOST_LOG_TRIVIAL(warning) << "OrcaCloudServiceAgent: cannot derive key for user secret file storage";
+            BOOST_LOG_TRIVIAL(warning) << "OrcaCloudServiceAgent: cannot derive key for refresh-token file storage";
             return;
         }
 
@@ -1467,31 +1416,27 @@ void OrcaCloudServiceAgent::persist_user_secret(const std::string& token)
         }
 
         compute_fallback_path();
-        if (secret_fallback_path.empty()) {
-            BOOST_LOG_TRIVIAL(warning) << "OrcaCloudServiceAgent: no user secret storage path available; skipping file persistence";
-            return;
-        }
-        wxFileName path(wxString::FromUTF8(secret_fallback_path.c_str()));
+        wxFileName path(wxString::FromUTF8(refresh_fallback_path.c_str()));
         path.Normalize();
         if (!wxFileName::DirExists(path.GetPath())) {
             wxFileName::Mkdir(path.GetPath(), wxS_DIR_DEFAULT, wxPATH_MKDIR_FULL);
         }
 
-        const std::string tmp_path = secret_fallback_path + ".tmp";
+        const std::string tmp_path = refresh_fallback_path + ".tmp";
         std::ofstream ofs(tmp_path, std::ios::out | std::ios::trunc | std::ios::binary);
         if (ofs.good()) {
             ofs << signed_payload;
             ofs.flush();
             ofs.close();
 
-            if (wxRenameFile(wxString::FromUTF8(tmp_path.c_str()), wxString::FromUTF8(secret_fallback_path.c_str()), true)) {
+            if (wxRenameFile(wxString::FromUTF8(tmp_path.c_str()), wxString::FromUTF8(refresh_fallback_path.c_str()), true)) {
                 stored = true;
             } else {
                 wxRemoveFile(wxString::FromUTF8(tmp_path.c_str()));
-                BOOST_LOG_TRIVIAL(warning) << "OrcaCloudServiceAgent: failed to atomically replace user secret file";
+                BOOST_LOG_TRIVIAL(warning) << "OrcaCloudServiceAgent: failed to atomically replace refresh-token file";
             }
         } else {
-            BOOST_LOG_TRIVIAL(warning) << "OrcaCloudServiceAgent: cannot open user secret file for write - " << secret_fallback_path;
+            BOOST_LOG_TRIVIAL(warning) << "OrcaCloudServiceAgent: cannot open refresh-token file for write - " << refresh_fallback_path;
         }
     } else {
         // Use wxSecretStore only
@@ -1511,15 +1456,15 @@ void OrcaCloudServiceAgent::persist_user_secret(const std::string& token)
     (void) stored;
 }
 
-bool OrcaCloudServiceAgent::load_user_secret(std::string& out_token)
+bool OrcaCloudServiceAgent::load_refresh_token(std::string& out_token)
 {
     out_token.clear();
 
     if (m_use_encrypted_token_file) {
         // Load from encrypted file only
         compute_fallback_path();
-        if (wxFileExists(wxString::FromUTF8(secret_fallback_path.c_str()))) {
-            std::ifstream ifs(secret_fallback_path, std::ios::binary);
+        if (wxFileExists(wxString::FromUTF8(refresh_fallback_path.c_str()))) {
+            std::ifstream ifs(refresh_fallback_path, std::ios::binary);
             std::string payload((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
             auto key = sha256_bytes(get_encryption_key());
             std::string plain;
@@ -1542,7 +1487,7 @@ bool OrcaCloudServiceAgent::load_user_secret(std::string& out_token)
                         std::transform(computed_hmac.begin(), computed_hmac.end(), computed_hmac.begin(), ::tolower);
                         if (computed_hmac.empty() || computed_hmac != lower_stored) {
                             integrity_ok = false;
-                            BOOST_LOG_TRIVIAL(warning) << "OrcaCloudServiceAgent: user secret integrity check failed (HMAC mismatch)";
+                            BOOST_LOG_TRIVIAL(warning) << "OrcaCloudServiceAgent: refresh token integrity check failed (HMAC mismatch)";
                         }
                     }
                 }
@@ -1551,7 +1496,7 @@ bool OrcaCloudServiceAgent::load_user_secret(std::string& out_token)
                     out_token = plain;
                     // Upgrade legacy payloads to signed format
                     if (payload.rfind("v2:", 0) != 0) {
-                        persist_user_secret(out_token);
+                        persist_refresh_token(out_token);
                     }
                     return true;
                 }
@@ -1574,7 +1519,7 @@ bool OrcaCloudServiceAgent::load_user_secret(std::string& out_token)
     return false;
 }
 
-void OrcaCloudServiceAgent::clear_user_secret()
+void OrcaCloudServiceAgent::clear_refresh_token()
 {
     wxSecretStore store = wxSecretStore::GetDefault();
     if (store.IsOk()) {
@@ -1582,8 +1527,8 @@ void OrcaCloudServiceAgent::clear_user_secret()
     }
 
     compute_fallback_path();
-    if (!secret_fallback_path.empty() && wxFileExists(wxString::FromUTF8(secret_fallback_path.c_str()))) {
-        wxRemoveFile(wxString::FromUTF8(secret_fallback_path.c_str()));
+    if (!refresh_fallback_path.empty() && wxFileExists(wxString::FromUTF8(refresh_fallback_path.c_str()))) {
+        wxRemoveFile(wxString::FromUTF8(refresh_fallback_path.c_str()));
     }
 }
 
@@ -1665,11 +1610,7 @@ RefreshResult OrcaCloudServiceAgent::refresh_from_storage(const std::string& rea
 {
     std::string refresh_token = get_refresh_token();
     if (refresh_token.empty()) {
-        std::string user_secret;
-        if (load_user_secret(user_secret) && !user_secret.empty()) {
-            SessionInfo stored_session;
-            parse_stored_secret(user_secret, refresh_token, stored_session);
-        }
+        load_refresh_token(refresh_token);
     }
     if (refresh_token.empty()) {
         BOOST_LOG_TRIVIAL(warning) << "OrcaCloudServiceAgent: no refresh token available for refresh (reason=" << reason << ")";
@@ -1749,8 +1690,7 @@ bool OrcaCloudServiceAgent::set_user_session(const std::string& token,
                                      const std::string& username,
                                      const std::string& nickname,
                                      const std::string& avatar,
-                                     const std::string& refresh_token,
-                                     bool persist)
+                                     const std::string& refresh_token)
 {
     std::chrono::system_clock::time_point exp_tp{};
     decode_jwt_expiry(token, exp_tp);
@@ -1767,13 +1707,8 @@ bool OrcaCloudServiceAgent::set_user_session(const std::string& token,
         session.logged_in = true;
     }
 
-    if (persist) {
-        json sec             = json::object();
-        sec["refresh_token"] = refresh_token;
-        sec["user_id"]       = user_id;
-        sec["username"]      = username;
-        sec["nickname"]      = nickname;
-        persist_user_secret(sec.dump());
+    if (!refresh_token.empty()) {
+        persist_refresh_token(refresh_token);
     }
 
     // Set per-user sync state path
@@ -1849,7 +1784,7 @@ void OrcaCloudServiceAgent::clear_session()
         std::lock_guard<std::mutex> lock(session_mutex);
         session = SessionInfo{};
     }
-    clear_user_secret();
+    clear_refresh_token();
 }
 
 // ============================================================================
@@ -2284,13 +2219,10 @@ bool OrcaCloudServiceAgent::http_post_auth(const std::string& path, const std::s
 
 void OrcaCloudServiceAgent::compute_fallback_path()
 {
-    if (!secret_fallback_path.empty())
-        return;
-    if (wxTheApp == nullptr)
-        return;
+    if (!refresh_fallback_path.empty()) return;
     wxFileName fallback(wxStandardPaths::Get().GetUserDataDir(), "orca_refresh_token.sec");
     fallback.Normalize();
-    secret_fallback_path = fallback.GetFullPath().ToStdString();
+    refresh_fallback_path = fallback.GetFullPath().ToStdString();
 }
 
 // ============================================================================
