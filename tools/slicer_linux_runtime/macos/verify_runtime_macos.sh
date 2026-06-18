@@ -1,6 +1,8 @@
 #!/bin/bash
 set -euo pipefail
 
+export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/local/sbin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH:-}"
+
 PACKAGE_DIR=""
 COMPONENT_DIR=""
 COMPONENT_CACHE_DIR=""
@@ -63,7 +65,7 @@ COMPONENT_CACHE_DIR=$(normalize_component_cache_dir "$COMPONENT_CACHE_DIR")
 APP_SUPPORT_DIR="$HOME/Library/Application Support/BambuStudio_OrcaSlicer/slicer-linux-runtime"
 RUNTIME_DIR="${SLICER_LINUX_RUNTIME_MAC_RUNTIME_DIR:-$APP_SUPPORT_DIR/runtime}"
 LOG_DIR="$APP_SUPPORT_DIR/logs"
-INSTALL_VERSION="SLICER-LINUX-RUNTIME-MAC-0.15"
+INSTALL_VERSION="SLICER-LINUX-RUNTIME-MAC-0.16"
 INSTALL_VERSION_FILE="$APP_SUPPORT_DIR/install_version.txt"
 PROBE_MARKER_FILE="$APP_SUPPORT_DIR/component_probe_marker.txt"
 mkdir -p "$APP_SUPPORT_DIR" "$LOG_DIR"

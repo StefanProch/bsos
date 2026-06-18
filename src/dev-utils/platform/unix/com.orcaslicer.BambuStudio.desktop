@@ -1,7 +1,7 @@
 [Desktop Entry]
-Name=BambuStudio
+Name=BambuStudio-OrcaSlicer
 GenericName=3D Printing Software
-Icon=BambuStudio
+Icon=BambuStudio-OrcaSlicer
 Exec=bambu-studio %U
 Terminal=false
 Type=Application
@@ -11,4 +11,4 @@ MimeType=model/stl;model/3mf;application/vnd.ms-3mfdocument;application/prs.wave
 Categories=Graphics;3DGraphics;Engineering;
 Keywords=3D;Printing;Slicer;slice;3D;printer;convert;gcode;stl;obj;amf;SLA
 StartupNotify=false
-StartupWMClass=bambu-studio
+StartupWMClass=BambuStudio_OrcaSlicer

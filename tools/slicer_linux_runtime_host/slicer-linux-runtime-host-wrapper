@@ -1,6 +1,8 @@
 #!/bin/sh
 set -eu
 
+export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/local/sbin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH:-}"
+
 HOST_PATH="${1:-}"
 RUNTIME_DIR="${2:-}"
 COMPONENT_DIR="${3:-}"

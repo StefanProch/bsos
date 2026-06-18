@@ -394,7 +394,7 @@ DPIFrame(NULL, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, BORDERLESS_FRAME_
     default:
     case GUI_App::EAppMode::Editor:
         m_taskbar_icon = std::make_unique<OrcaSlicerTaskBarIcon>(wxTBI_DOCK);
-        m_taskbar_icon->SetIcon(main_frame_icon(wxGetApp().get_app_mode()), "BambuStudio");
+        m_taskbar_icon->SetIcon(main_frame_icon(wxGetApp().get_app_mode()), "BambuStudio-OrcaSlicer");
         break;
     case GUI_App::EAppMode::GCodeViewer:
         break;

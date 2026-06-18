@@ -135,17 +135,19 @@ find_gnu_m4() {
   return 1
 }
 
-if ! is_gnu_m4 "${M4:-}"; then
-  if _found_m4="$(find_gnu_m4)"; then
-    export M4="$_found_m4"
-  else
-    echo "ERROR: GNU m4 not found. Install Homebrew m4 and ensure M4 points to GNU m4."
-    exit 1
+if [ "$BUILD_TARGET" = "all" ] || [ "$BUILD_TARGET" = "deps" ]; then
+  if ! is_gnu_m4 "${M4:-}"; then
+    if _found_m4="$(find_gnu_m4)"; then
+      export M4="$_found_m4"
+    else
+      echo "ERROR: GNU m4 not found. Install Homebrew m4 and ensure M4 points to GNU m4."
+      exit 1
+    fi
   fi
-fi
 
-export PATH="$(dirname "$M4"):$PATH"
-echo " - M4: $M4"
+  export PATH="$(dirname "$M4"):$PATH"
+  echo " - M4: $M4"
+fi
 
 CMAKE_VERSION=$(cmake --version | head -1 | sed 's/[^0-9]*\([0-9]*\).*/\1/')
 if [ "$CMAKE_VERSION" -ge 4 ] 2>/dev/null; then

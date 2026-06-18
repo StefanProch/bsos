@@ -1,6 +1,8 @@
 #!/bin/bash
 set -euo pipefail
 
+export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/local/sbin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH:-}"
+
 PACKAGE_DIR=""
 COMPONENT_DIR=""
 COMPONENT_CACHE_DIR=""
@@ -60,7 +62,7 @@ LOCAL_LIMA_ROOT="$APP_SUPPORT_DIR/lima"
 LOCAL_LIMA_BIN="$LOCAL_LIMA_ROOT/bin"
 RUNTIME_DIR="${SLICER_LINUX_RUNTIME_MAC_RUNTIME_DIR:-$APP_SUPPORT_DIR/runtime}"
 LOG_DIR="$APP_SUPPORT_DIR/logs"
-INSTALL_VERSION="SLICER-LINUX-RUNTIME-MAC-0.15"
+INSTALL_VERSION="SLICER-LINUX-RUNTIME-MAC-0.16"
 INSTALL_VERSION_FILE="$APP_SUPPORT_DIR/install_version.txt"
 PROBE_MARKER_FILE="$APP_SUPPORT_DIR/component_probe_marker.txt"
 mkdir -p "$APP_SUPPORT_DIR" "$LOCAL_LIMA_ROOT" "$RUNTIME_DIR" "$LOG_DIR"
@@ -91,6 +93,52 @@ find_system_limactl() {
             return 0
         fi
     done
+    return 1
+}
+
+find_brew() {
+    if command -v brew >/dev/null 2>&1; then
+        command -v brew
+        return 0
+    fi
+    for candidate in /opt/homebrew/bin/brew /usr/local/bin/brew; do
+        if [[ -x "$candidate" ]]; then
+            printf '%s\n' "$candidate"
+            return 0
+        fi
+    done
+    return 1
+}
+
+find_qemu_system_x86_64() {
+    local candidate prefix brew_bin
+    if command -v qemu-system-x86_64 >/dev/null 2>&1; then
+        command -v qemu-system-x86_64
+        return 0
+    fi
+    for candidate in \
+        /opt/homebrew/bin/qemu-system-x86_64 \
+        /usr/local/bin/qemu-system-x86_64 \
+        /opt/homebrew/opt/qemu/bin/qemu-system-x86_64 \
+        /usr/local/opt/qemu/bin/qemu-system-x86_64
+    do
+        if [[ -x "$candidate" ]]; then
+            printf '%s\n' "$candidate"
+            return 0
+        fi
+    done
+    brew_bin=$(find_brew || true)
+    if [[ -n "$brew_bin" ]]; then
+        for prefix in "$($brew_bin --prefix qemu 2>/dev/null || true)" "$($brew_bin --prefix 2>/dev/null || true)"; do
+            [[ -n "$prefix" ]] || continue
+            for candidate in "$prefix/bin/qemu-system-x86_64" "$prefix/opt/qemu/bin/qemu-system-x86_64"; do
+                if [[ -x "$candidate" ]]; then
+                    printf '%s\n' "$candidate"
+                    return 0
+                fi
+            done
+        done
+    fi
     return 1
 }
 
@@ -296,17 +344,24 @@ ensure_qemu_if_needed() {
         *) return 0 ;;
     esac
 
-    if command -v qemu-system-x86_64 >/dev/null 2>&1; then
-        return 0
-    fi
-    if command -v brew >/dev/null 2>&1; then
-        brew install qemu || true
-    fi
-    if command -v qemu-system-x86_64 >/dev/null 2>&1; then
+    local qemu_bin brew_bin
+    qemu_bin=$(find_qemu_system_x86_64 || true)
+    if [[ -n "$qemu_bin" ]]; then
+        export PATH="$(dirname "$qemu_bin"):$PATH"
         return 0
     fi
 
-    echo "qemu-system-x86_64 not found; install QEMU and retry" >&2
+    brew_bin=$(find_brew || true)
+    if [[ -n "$brew_bin" ]]; then
+        "$brew_bin" install qemu || true
+        qemu_bin=$(find_qemu_system_x86_64 || true)
+        if [[ -n "$qemu_bin" ]]; then
+            export PATH="$(dirname "$qemu_bin"):$PATH"
+            return 0
+        fi
+    fi
+
+    echo "qemu-system-x86_64 not found; install QEMU with: brew install qemu" >&2
     return 1
 }
 
