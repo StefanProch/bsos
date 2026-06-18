@@ -587,8 +587,9 @@ void MediaFilePanel::fetchUrl(boost::weak_ptr<PrinterFileSystem> wfs)
             });
         };
 
+        const std::string provider = wxGetApp().get_printer_cloud_provider();
         std::string dev_id = machine + "|" + dev_ver + "|" + protocols[m_remote_proto];
-        int ret = agent->get_camera_url(dev_id, [agent, machine, apply_url](std::string url) {
+        int ret = agent->get_camera_url(dev_id, [agent, machine, apply_url, provider](std::string url) {
             if (!url.empty()) {
                 (*apply_url)(std::move(url));
                 return;
@@ -596,11 +597,11 @@ void MediaFilePanel::fetchUrl(boost::weak_ptr<PrinterFileSystem> wfs)
 
             int retry_ret = agent->get_camera_url(machine, [apply_url](std::string retry_url) {
                 (*apply_url)(std::move(retry_url));
-            });
+            }, provider);
 
             if (retry_ret != 0)
                 (*apply_url)(std::move(url));
-        });
+        }, provider);
 
         if (ret != 0) {
             (*apply_url)("[" + std::to_string(ret) + "]");
