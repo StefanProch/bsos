@@ -60,7 +60,7 @@ LOCAL_LIMA_ROOT="$APP_SUPPORT_DIR/lima"
 LOCAL_LIMA_BIN="$LOCAL_LIMA_ROOT/bin"
 RUNTIME_DIR="${SLICER_LINUX_RUNTIME_MAC_RUNTIME_DIR:-$APP_SUPPORT_DIR/runtime}"
 LOG_DIR="$APP_SUPPORT_DIR/logs"
-INSTALL_VERSION="SLICER-LINUX-RUNTIME-MAC-0.14"
+INSTALL_VERSION="SLICER-LINUX-RUNTIME-MAC-0.15"
 INSTALL_VERSION_FILE="$APP_SUPPORT_DIR/install_version.txt"
 PROBE_MARKER_FILE="$APP_SUPPORT_DIR/component_probe_marker.txt"
 mkdir -p "$APP_SUPPORT_DIR" "$LOCAL_LIMA_ROOT" "$RUNTIME_DIR" "$LOG_DIR"
@@ -269,10 +269,7 @@ select_lima_mode() {
     LIMA_CREATE_ARGS=(start "--name=${INSTANCE}" --tty=false --mount-writable --containerd=none)
 
     if [[ "$host_arch" == "arm64" ]]; then
-        if [[ "$major" -ge 13 && "${SLICER_LINUX_RUNTIME_MAC_USE_QEMU:-}" == "1" ]]; then
-            LIMA_MODE="qemu-x86_64"
-            LIMA_CREATE_ARGS+=(--vm-type=qemu --arch=x86_64 --mount-type=9p)
-        elif [[ "$major" -ge 13 && portable_x86_loader_available ]]; then
+        if [[ "$major" -ge 13 && "${SLICER_LINUX_RUNTIME_MAC_USE_ROSETTA:-}" == "1" && portable_x86_loader_available ]]; then
             LIMA_MODE="vz-aarch64-rosetta"
             LIMA_CREATE_ARGS+=(--vm-type=vz --arch=aarch64 --mount-type=virtiofs --rosetta)
         else

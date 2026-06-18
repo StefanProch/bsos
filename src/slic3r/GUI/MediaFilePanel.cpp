@@ -14,6 +14,9 @@
 #include <libslic3r/Format/bbs_3mf.hpp>
 #include "DeviceCore/DevStorage.h"
 
+#include <functional>
+#include <memory>
+
 #ifdef __WXMSW__
 #include <shellapi.h>
 #endif
@@ -550,8 +553,13 @@ void MediaFilePanel::fetchUrl(boost::weak_ptr<PrinterFileSystem> wfs)
     }
     if (agent) {
         std::string protocols[] = {"", "\"tutk\"", "\"agora\"", "\"tutk\",\"agora\""};
-        agent->get_camera_url(m_machine + "|" + m_dev_ver + "|" + protocols[m_remote_proto],
-            [this, wfs, m = m_machine, v = agent->get_version(), dv = m_dev_ver](std::string url) {
+        std::string machine = m_machine;
+        std::string dev_ver = m_dev_ver;
+        std::string agent_version = agent->get_version();
+
+        auto apply_url = std::make_shared<std::function<void(std::string)>>();
+
+        *apply_url = [this, wfs, m = machine, v = agent_version, dv = dev_ver](std::string url) {
             if (boost::algorithm::starts_with(url, "bambu:///")) {
                 url += "&device=" + m;
                 url += "&net_ver=" + v;
@@ -577,7 +585,26 @@ void MediaFilePanel::fetchUrl(boost::weak_ptr<PrinterFileSystem> wfs)
                     fs->SetUrl(res);
                 }
             });
+        };
+
+        std::string dev_id = machine + "|" + dev_ver + "|" + protocols[m_remote_proto];
+        int ret = agent->get_camera_url(dev_id, [agent, machine, apply_url](std::string url) {
+            if (!url.empty()) {
+                (*apply_url)(std::move(url));
+                return;
+            }
+
+            int retry_ret = agent->get_camera_url(machine, [apply_url](std::string retry_url) {
+                (*apply_url)(std::move(retry_url));
+            });
+
+            if (retry_ret != 0)
+                (*apply_url)(std::move(url));
         });
+
+        if (ret != 0) {
+            (*apply_url)("[" + std::to_string(ret) + "]");
+        }
     }
 }
 

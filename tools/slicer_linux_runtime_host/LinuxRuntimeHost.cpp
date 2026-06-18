@@ -1240,7 +1240,8 @@ nlohmann::json LinuxRuntimeHost::handle(const std::string& method, const nlohman
         if (!f || !a) return not_supported(method);
         const std::string dev_id = payload.value("dev_id", std::string());
         auto r = wait_string_callback([&](auto cb) { return f(a, dev_id, cb); });
-        host_log_json("net.get_camera_url.result", {{"dev_id", dev_id}, {"value", r.value("value", -9999)}, {"result_len", r.value("result", std::string()).size()}});
+        const std::string result = r.value("result", std::string());
+        host_log_json("net.get_camera_url.result", {{"dev_id", dev_id}, {"value", r.value("value", -9999)}, {"result_len", result.size()}, {"result_is_bambu", result.rfind("bambu:///", 0) == 0}});
         return r;
     }
     if (method == "net.get_camera_url_for_golive") {
@@ -1250,7 +1251,8 @@ nlohmann::json LinuxRuntimeHost::handle(const std::string& method, const nlohman
         const std::string dev_id = payload.value("dev_id", std::string());
         const std::string sdev_id = payload.value("sdev_id", std::string());
         auto r = wait_string_callback([&](auto cb) { return f(a, dev_id, sdev_id, cb); });
-        host_log_json("net.get_camera_url_for_golive.result", {{"dev_id", dev_id}, {"sdev_id", sdev_id}, {"value", r.value("value", -9999)}, {"result_len", r.value("result", std::string()).size()}});
+        const std::string result = r.value("result", std::string());
+        host_log_json("net.get_camera_url_for_golive.result", {{"dev_id", dev_id}, {"sdev_id", sdev_id}, {"value", r.value("value", -9999)}, {"result_len", result.size()}, {"result_is_bambu", result.rfind("bambu:///", 0) == 0}});
         return r;
     }
     if (method == "net.get_design_staffpick") { auto f = net<int (*)(void*, int, int, std::function<void(std::string)>)>("bambu_network_get_design_staffpick"); auto a = lookup_agent(); if (!f || !a) return not_supported(method); return wait_string_callback([&](auto cb) { return f(a, payload.value("offset", 0), payload.value("limit", 0), cb); }); }
