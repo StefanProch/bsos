@@ -405,10 +405,16 @@ echo -n "Creating Appimage for distribution..."
     chmod +x ../build_appimage.sh
     if ../build_appimage.sh; then
         popd > /dev/null
-        mv package_appimage/"@SLIC3R_APP_KEY@_Linux_V@SoftFever_VERSION@.AppImage" "@SLIC3R_APP_KEY@_Linux_V@SoftFever_VERSION@.AppImage"
+        mapfile -t appimages < <(find package_appimage -maxdepth 1 -type f -name '*.AppImage' ! -name 'appimagetool.AppImage' | LC_ALL=C sort)
+        if (( ${#appimages[@]} == 0 )); then
+            echo "AppImage was not produced" >&2
+            exit 1
+        fi
+        mv "${appimages[0]}" "BambuStudio-OrcaSlicer_Linux_V@SoftFever_VERSION@.AppImage"
         rm -fR package_appimage
     else
         popd > /dev/null
+        exit 1
     fi
 # } &> $ROOT/Build.log # Capture all command output
 echo "done"

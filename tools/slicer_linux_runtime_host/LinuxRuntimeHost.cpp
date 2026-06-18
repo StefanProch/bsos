@@ -104,6 +104,31 @@ std::string trim_for_log(const std::string& value, std::size_t limit = 8192)
     return value.substr(0, limit) + "...<truncated>";
 }
 
+
+std::string replace_url_param_value(std::string value, const std::string& key, const std::string& replacement)
+{
+    if (replacement.empty())
+        return value;
+
+    const std::string prefix = key + "=";
+    std::size_t search = 0;
+    for (;;) {
+        std::size_t pos = value.find(prefix, search);
+        if (pos == std::string::npos)
+            return value;
+
+        if (pos == 0 || value[pos - 1] == '?' || value[pos - 1] == '&') {
+            pos += prefix.size();
+            const std::size_t end = value.find('&', pos);
+            value.replace(pos, end == std::string::npos ? std::string::npos : end - pos, replacement);
+            return value;
+        }
+
+        search = pos + prefix.size();
+    }
+}
+
+
 void host_log_json(const std::string& kind, const nlohmann::json& payload)
 {
     try {
@@ -454,7 +479,7 @@ std::string LinuxRuntimeHost::refresh_agora_url_ptr_string() const
 {
     const auto value = reinterpret_cast<std::uintptr_t>(&host_refresh_agora_url);
     std::ostringstream ss;
-    ss << value;
+    ss << std::hex << value;
     return ss.str();
 }
 
@@ -736,11 +761,16 @@ void LinuxRuntimeHost::set_callback_reply(std::int64_t request_id, const std::st
     state->cv.notify_all();
 }
 
-nlohmann::json LinuxRuntimeHost::handle(const std::string& method, const nlohmann::json& payload)
+nlohmann::json LinuxRuntimeHost::handle(const std::string& method, const nlohmann::json& raw_payload)
 {
     using namespace BBL;
 
     clear_thread_reply_binary();
+
+    const nlohmann::json empty_payload = nlohmann::json::object();
+    const nlohmann::json& payload = raw_payload.is_null() ? empty_payload : raw_payload;
+    if (!payload.is_object())
+        return {{"ok", false}, {"error", "request payload must be object"}, {"method", method}};
 
     if (method == "runtime.poll_events")
         return drain_events(payload.value("limit", 64U));
@@ -1324,7 +1354,11 @@ nlohmann::json LinuxRuntimeHost::handle(const std::string& method, const nlohman
         auto f = net<fn_ft_tunnel_create>("ft_tunnel_create");
         if (!f) return not_supported(method);
         FT_TunnelHandle* tunnel = nullptr;
-        const int ret = static_cast<int>(f(payload.value("url", std::string()).c_str(), &tunnel));
+        const std::string raw_url = payload.value("url", std::string());
+        const std::string url = raw_url.rfind("bambu:///", 0) == 0
+            ? replace_url_param_value(raw_url, "refresh_url", refresh_agora_url_ptr_string())
+            : raw_url;
+        const int ret = static_cast<int>(f(url.c_str(), &tunnel));
         if (ret != 0 || !tunnel)
             return {{"ok", true}, {"value", ret}, {"tunnel", 0}};
         const auto id = m_next_ft_tunnel++;
@@ -1362,6 +1396,9 @@ nlohmann::json LinuxRuntimeHost::handle(const std::string& method, const nlohman
         auto f = net<fn_ft_job_create>("ft_job_create");
         auto set_result_cb = net<fn_ft_job_set_result_cb>("ft_job_set_result_cb");
         auto set_msg_cb = net<fn_ft_job_set_msg_cb>("ft_job_set_msg_cb");
+        auto free_result = net<fn_ft_job_result_destroy>("ft_job_result_destroy");
+        auto free_msg = net<fn_ft_job_msg_destroy>("ft_job_msg_destroy");
+        auto free_mem = net<fn_ft_free>("ft_free");
         if (!f) return not_supported(method);
         FT_JobHandle* job = nullptr;
         const int ret = static_cast<int>(f(payload.value("params_json", std::string()).c_str(), &job));
@@ -1370,6 +1407,9 @@ nlohmann::json LinuxRuntimeHost::handle(const std::string& method, const nlohman
         const auto id = m_next_ft_job++;
         auto state = std::make_shared<HostFtJobState>();
         state->handle = job;
+        state->result_destroy = reinterpret_cast<void*>(free_result);
+        state->msg_destroy = reinterpret_cast<void*>(free_msg);
+        state->free_mem = reinterpret_cast<void*>(free_mem);
         if (set_result_cb) {
             set_result_cb(job, [](void* user, ft_job_result result) {
                 auto* state = static_cast<HostFtJobState*>(user);
@@ -1379,6 +1419,12 @@ nlohmann::json LinuxRuntimeHost::handle(const std::string& method, const nlohman
                     std::lock_guard<std::mutex> lock(state->mutex);
                     copy_ft_job_result_payload(*state, result);
                     state->result_ready = true;
+                }
+                if (auto destroy = reinterpret_cast<fn_ft_job_result_destroy>(state->result_destroy)) {
+                    destroy(&result);
+                } else if (auto free_mem = reinterpret_cast<fn_ft_free>(state->free_mem)) {
+                    if (result.json) free_mem((void*) result.json);
+                    if (result.bin) free_mem((void*) result.bin);
                 }
                 state->cv.notify_all();
             }, state.get());
@@ -1391,6 +1437,11 @@ nlohmann::json LinuxRuntimeHost::handle(const std::string& method, const nlohman
                 {
                     std::lock_guard<std::mutex> lock(state->mutex);
                     state->messages.emplace_back(msg.kind, std::string(msg.json ? msg.json : ""));
+                }
+                if (auto destroy = reinterpret_cast<fn_ft_job_msg_destroy>(state->msg_destroy)) {
+                    destroy(&msg);
+                } else if (auto free_mem = reinterpret_cast<fn_ft_free>(state->free_mem)) {
+                    if (msg.json) free_mem((void*) msg.json);
                 }
                 state->cv.notify_all();
             }, state.get());
@@ -1540,7 +1591,10 @@ nlohmann::json LinuxRuntimeHost::handle(const std::string& method, const nlohman
         auto f = src<int (*)(Bambu_Tunnel*, const char*)>("Bambu_Create");
         if (!f) return not_supported(method);
         Bambu_Tunnel tunnel = nullptr;
-        const std::string path = windows_path_to_wsl(payload.value("path", std::string()));
+        const std::string raw_path = windows_path_to_wsl(payload.value("path", std::string()));
+        const std::string path = raw_path.rfind("bambu:///", 0) == 0
+            ? replace_url_param_value(raw_path, "refresh_url", refresh_agora_url_ptr_string())
+            : raw_path;
         const int ret = f(&tunnel, path.c_str());
         if (ret != 0)
             return {{"ok", true}, {"value", ret}, {"tunnel", 0}};

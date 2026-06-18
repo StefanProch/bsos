@@ -193,7 +193,7 @@ int main(int argc, char** argv)
         }
 
         std::vector<unsigned char> request_binary;
-        if (req.payload.value("__binary_request", false)) {
+        if (req.payload.is_object() && req.payload.value("__binary_request", false)) {
             RawRpcFrame binary_raw;
             if (!read_raw_frame(std::cin, binary_raw, err) ||
                 binary_raw.type != RpcFrameType::binary_data ||
@@ -207,7 +207,17 @@ int main(int argc, char** argv)
 
         std::thread([&host, &rpc_out, &out_mutex, req_id = req.id, req_method = req.method, req_payload = req.payload, request_binary = std::move(request_binary)]() mutable {
             LinuxRuntimeHost::set_thread_request_binary(std::move(request_binary));
-            nlohmann::json resp = host.handle(req_method, req_payload);
+
+            nlohmann::json resp;
+            try {
+                resp = host.handle(req_method, req_payload);
+            } catch (const std::exception& e) {
+                std::cerr << "[SLRUNTIME] unhandled exception in method " << req_method << ": " << e.what() << std::endl;
+                resp = {{"ok", false}, {"error", e.what()}, {"method", req_method}};
+            } catch (...) {
+                std::cerr << "[SLRUNTIME] unknown exception in method " << req_method << std::endl;
+                resp = {{"ok", false}, {"error", "unknown exception"}, {"method", req_method}};
+            }
 
             std::vector<unsigned char> reply_binary;
             const bool has_reply_binary = LinuxRuntimeHost::consume_thread_reply_binary(reply_binary);

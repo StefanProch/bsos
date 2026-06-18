@@ -997,9 +997,10 @@ SLICER_LINUX_RUNTIME_EXPORT int Bambu_ReadSample(Bambu_Tunnel tunnel, Bambu_Samp
     cached.size = s.value("size", 0);
     cached.flags = s.value("flags", 0);
     cached.decode_time = s.value("decode_time", 0ULL);
+    t->sample_queue.clear();
     t->sample_queue.push_back(std::move(cached));
 
-    auto& front = t->sample_queue.back();
+    auto& front = t->sample_queue.front();
     sample->itrack = front.itrack;
     sample->size = front.size;
     sample->flags = front.flags;

@@ -46,6 +46,9 @@ struct HostFtJobState {
     std::string result_json;
     std::vector<unsigned char> result_bin;
     std::deque<std::pair<int, std::string>> messages;
+    void* result_destroy{nullptr};
+    void* msg_destroy{nullptr};
+    void* free_mem{nullptr};
 };
 
 class LinuxRuntimeHost {
