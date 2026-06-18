@@ -1210,8 +1210,8 @@ GLCanvas3D::GLCanvas3D(wxGLCanvas* canvas, Bed3D &bed)
     const wxString alt   = GUI::shortkey_alt_prefix();
 
     m_shortcuts_assembly_view = {
-        {_L("Left mouse button"),       _L("Object Selection")},
-        {alt + _L("Left mouse button"), _L("Part Selection")},
+        {_L("Left mouse button"),       _L("Object selection")},
+        {alt + _L("Left mouse button"), _L("Part selection")},
         {"1~16 " + _L("number keys"),   _L("Number keys can quickly change the color of objects")},
     };
 }

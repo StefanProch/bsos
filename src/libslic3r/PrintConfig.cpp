@@ -818,6 +818,14 @@ void PrintConfigDef::init_common_params()
     def->cli = ConfigOptionDef::nocli;
     def->set_default_value(new ConfigOptionBool(false));
 
+    def = this->add("use_3mf", coBool);
+    def->label = L("Use 3MF instead of G-code");
+    def->tooltip = L("Enable this if the printer accepts a 3MF file as the print job. When enabled, Orca Slicer "
+                     "sends the sliced file as a .gcode.3mf, instead of a plain .gcode file.");
+    def->mode = comAdvanced;
+    def->cli = ConfigOptionDef::nocli;
+    def->set_default_value(new ConfigOptionBool(false));
+
     def = this->add("printer_agent", coString);
     def->label = L("Printer Agent");
     def->tooltip = L("Select the network agent implementation for printer communication.");
@@ -2386,7 +2394,8 @@ void PrintConfigDef::init_fff_params()
     def = this->add("adaptive_pressure_advance_overhangs", coBools);
     def->label = L("Enable adaptive pressure advance for overhangs (beta)");
     def->tooltip = L("Enable adaptive PA for overhangs as well as when flow changes within the same feature. This is an experimental option, "
-                     "as if the PA profile is not set accurately, it will cause uniformity issues on the external surfaces before and after overhangs.\n");
+                     "as if the PA profile is not set accurately, it will cause uniformity issues on the external surfaces before and after overhangs.\n"
+                     "Not compatible with Prusa printers as they pause to process PA changes, which causes delays and defects.");
     def->mode = comAdvanced;
     def->set_default_value(new ConfigOptionBools{ false });
 
@@ -4394,7 +4403,7 @@ void PrintConfigDef::init_fff_params()
     def->set_default_value(new ConfigOptionBool(false));
 
     def = this->add("zaa_min_z", coFloat);
-    def->label    = L("Minimum z height");
+    def->label    = L("Minimum Z height");
     def->category = L("Quality");
     def->tooltip  = L("Minimum Z-layer height.\n"
                       "Also controls the slicing plane.");

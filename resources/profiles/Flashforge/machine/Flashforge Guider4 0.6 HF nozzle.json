@@ -226,5 +226,6 @@
 	"z_hop_types": [
 		"Auto Lift"
 	],
-	"z_offset": "0"
+	"z_offset": "0",
+	"use_3mf": "1"
 }

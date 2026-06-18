@@ -1727,9 +1727,9 @@ void PreferencesDialog::create_items()
     g_sizer->Add(item_filament_sync_mode);
 
     //// ONLINE > Network plugin
-    g_sizer->Add(create_item_title(_L("Network plug-in")), 1, wxEXPAND);
+    g_sizer->Add(create_item_title(_L("Bambu network plug-in")), 1, wxEXPAND);
 
-    auto item_enable_plugin    = create_item_checkbox(_L("Enable network plug-in"), "", "installed_networking");
+    auto item_enable_plugin    = create_item_checkbox(_L("Enable Bambu network plug-in"), "", "installed_networking");
     g_sizer->Add(item_enable_plugin);
 
     g_sizer->AddSpacer(FromDIP(10));
@@ -1828,13 +1828,13 @@ void PreferencesDialog::create_items()
     auto loglevel_combox = create_item_loglevel_combobox(_L("Log Level"), _L("Log Level"), log_level_list);
     g_sizer->Add(loglevel_combox);
 
-    g_sizer->Add(create_item_title(_L("Network plug-in")), 1, wxEXPAND);
-    auto item_reload_plugin = create_item_button(_L("Network plug-in"), _L("Reload"), _L("Reload the network plug-in without restarting the application"), "", [this]() {
+    g_sizer->Add(create_item_title(_L("Bambu network plug-in")), 1, wxEXPAND);
+    auto item_reload_plugin = create_item_button(_L("Bambu network plug-in"), _L("Reload"), _L("Reload the Bambu network plug-in without restarting the application"), "", [this]() {
         if (wxGetApp().hot_reload_network_plugin()) {
-            MessageDialog dlg(this, _L("Network plug-in reloaded successfully."), _L("Reload"), wxOK | wxICON_INFORMATION);
+            MessageDialog dlg(this, _L("Bambu network plug-in reloaded successfully."), _L("Reload"), wxOK | wxICON_INFORMATION);
             dlg.ShowModal();
         } else {
-            MessageDialog dlg(this, _L("Failed to reload network plug-in. Please restart the application."), _L("Reload Failed"), wxOK | wxICON_ERROR);
+            MessageDialog dlg(this, _L("Failed to reload Bambu network plug-in. Please restart the application."), _L("Reload Failed"), wxOK | wxICON_ERROR);
             dlg.ShowModal();
         }
     });

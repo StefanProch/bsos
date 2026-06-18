@@ -42,6 +42,11 @@ cp "${REPO_ROOT}/scripts/flatpak/com.orcaslicer.BambuStudio.metainfo.xml" \
   "usr/share/metainfo/${APP_DESKTOP_ID}.metainfo.xml"
 cp "${REPO_ROOT}/scripts/flatpak/com.orcaslicer.BambuStudio.metainfo.xml" \
   "usr/share/metainfo/${APP_DESKTOP_ID}.appdata.xml"
+sed -i \
+  -e "s|<id>com.orcaslicer.BambuStudio</id>|<id>${APP_DESKTOP_ID}</id>|" \
+  -e "s|<launchable type=\"desktop-id\">com.orcaslicer.BambuStudio.desktop</launchable>|<launchable type=\"desktop-id\">${APP_DESKTOP_ID}.desktop</launchable>|" \
+  usr/share/metainfo/${APP_DESKTOP_ID}.metainfo.xml \
+  usr/share/metainfo/${APP_DESKTOP_ID}.appdata.xml
 
 
 export ARCH=$(uname -m)
