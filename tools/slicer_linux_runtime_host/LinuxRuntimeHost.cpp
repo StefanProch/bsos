@@ -1596,17 +1596,71 @@ nlohmann::json LinuxRuntimeHost::handle(const std::string& method, const nlohman
             ? replace_url_param_value(raw_path, "refresh_url", refresh_agora_url_ptr_string())
             : raw_path;
         const int ret = f(&tunnel, path.c_str());
-        if (ret != 0)
+        nlohmann::json log_payload{{"value", ret}, {"path_len", path.size()}, {"path_is_bambu", path.rfind("bambu:///", 0) == 0}, {"has_refresh_url", path.find("refresh_url=") != std::string::npos}};
+        if (ret != 0) {
+            log_payload["tunnel"] = 0;
+            host_log_json("src.create", log_payload);
             return {{"ok", true}, {"value", ret}, {"tunnel", 0}};
+        }
         const auto id = m_next_tunnel++;
         { std::lock_guard<std::mutex> lock(m_state_mutex); m_tunnels[id] = tunnel; }
+        log_payload["tunnel"] = id;
+        host_log_json("src.create", log_payload);
         return {{"ok", true}, {"value", ret}, {"tunnel", id}};
     }
-    if (method == "src.open") { auto f = src<int (*)(Bambu_Tunnel)>("Bambu_Open"); auto t = lookup_tunnel(); return f && t ? nlohmann::json{{"ok", true}, {"value", f(t)}} : not_supported(method); }
-    if (method == "src.start_stream") { auto f = src<int (*)(Bambu_Tunnel, bool)>("Bambu_StartStream"); auto t = lookup_tunnel(); return f && t ? nlohmann::json{{"ok", true}, {"value", f(t, payload.value("video", false))}} : not_supported(method); }
-    if (method == "src.start_stream_ex") { auto f = src<int (*)(Bambu_Tunnel, int)>("Bambu_StartStreamEx"); auto t = lookup_tunnel(); return f && t ? nlohmann::json{{"ok", true}, {"value", f(t, payload.value("type", 0))}} : not_supported(method); }
-    if (method == "src.get_stream_count") { auto f = src<int (*)(Bambu_Tunnel)>("Bambu_GetStreamCount"); auto t = lookup_tunnel(); return f && t ? nlohmann::json{{"ok", true}, {"value", f(t)}} : not_supported(method); }
-    if (method == "src.get_stream_info") { auto f = src<int (*)(Bambu_Tunnel, int, Bambu_StreamInfo*)>("Bambu_GetStreamInfo"); auto t = lookup_tunnel(); if (!f || !t) return not_supported(method); Bambu_StreamInfo info{}; const int ret = f(t, payload.value("index", 0), &info); nlohmann::json out{{"ok", true}, {"value", ret}}; if (ret == 0) { nlohmann::json ji{{"type", info.type}, {"sub_type", info.sub_type}, {"format_type", info.format_type}, {"format_size", info.format_size}, {"max_frame_size", info.max_frame_size}, {"format_buffer", info.format_buffer && info.format_size > 0 ? std::string(reinterpret_cast<const char*>(info.format_buffer), info.format_size) : std::string()}}; if (info.type == VIDE) ji.update({{"width", info.format.video.width}, {"height", info.format.video.height}, {"frame_rate", info.format.video.frame_rate}}); else ji.update({{"sample_rate", info.format.audio.sample_rate}, {"channel_count", info.format.audio.channel_count}, {"sample_size", info.format.audio.sample_size}}); out["info"] = ji; } return out; }
+    if (method == "src.open") {
+        auto f = src<int (*)(Bambu_Tunnel)>("Bambu_Open");
+        auto t = lookup_tunnel();
+        if (!f || !t) return not_supported(method);
+        const int ret = f(t);
+        host_log_json("src.open", {{"value", ret}, {"tunnel", payload.value("tunnel", 0LL)}});
+        return {{"ok", true}, {"value", ret}};
+    }
+    if (method == "src.start_stream") {
+        auto f = src<int (*)(Bambu_Tunnel, bool)>("Bambu_StartStream");
+        auto t = lookup_tunnel();
+        if (!f || !t) return not_supported(method);
+        const bool video = payload.value("video", false);
+        const int ret = f(t, video);
+        host_log_json("src.start_stream", {{"value", ret}, {"video", video}, {"tunnel", payload.value("tunnel", 0LL)}});
+        return {{"ok", true}, {"value", ret}};
+    }
+    if (method == "src.start_stream_ex") {
+        auto f = src<int (*)(Bambu_Tunnel, int)>("Bambu_StartStreamEx");
+        auto t = lookup_tunnel();
+        if (!f || !t) return not_supported(method);
+        const int type = payload.value("type", 0);
+        const int ret = f(t, type);
+        host_log_json("src.start_stream_ex", {{"value", ret}, {"type", type}, {"tunnel", payload.value("tunnel", 0LL)}});
+        return {{"ok", true}, {"value", ret}};
+    }
+    if (method == "src.get_stream_count") {
+        auto f = src<int (*)(Bambu_Tunnel)>("Bambu_GetStreamCount");
+        auto t = lookup_tunnel();
+        if (!f || !t) return not_supported(method);
+        const int ret = f(t);
+        host_log_json("src.get_stream_count", {{"value", ret}, {"tunnel", payload.value("tunnel", 0LL)}});
+        return {{"ok", true}, {"value", ret}};
+    }
+    if (method == "src.get_stream_info") {
+        auto f = src<int (*)(Bambu_Tunnel, int, Bambu_StreamInfo*)>("Bambu_GetStreamInfo");
+        auto t = lookup_tunnel();
+        if (!f || !t) return not_supported(method);
+        const int index = payload.value("index", 0);
+        Bambu_StreamInfo info{};
+        const int ret = f(t, index, &info);
+        nlohmann::json out{{"ok", true}, {"value", ret}};
+        nlohmann::json log_payload{{"value", ret}, {"index", index}, {"tunnel", payload.value("tunnel", 0LL)}};
+        if (ret == 0) {
+            nlohmann::json ji{{"type", info.type}, {"sub_type", info.sub_type}, {"format_type", info.format_type}, {"format_size", info.format_size}, {"max_frame_size", info.max_frame_size}, {"format_buffer", info.format_buffer && info.format_size > 0 ? std::string(reinterpret_cast<const char*>(info.format_buffer), info.format_size) : std::string()}};
+            if (info.type == VIDE) ji.update({{"width", info.format.video.width}, {"height", info.format.video.height}, {"frame_rate", info.format.video.frame_rate}});
+            else ji.update({{"sample_rate", info.format.audio.sample_rate}, {"channel_count", info.format.audio.channel_count}, {"sample_size", info.format.audio.sample_size}});
+            out["info"] = ji;
+            log_payload.update({{"type", info.type}, {"sub_type", info.sub_type}, {"format_type", info.format_type}, {"width", info.type == VIDE ? info.format.video.width : 0}, {"height", info.type == VIDE ? info.format.video.height : 0}, {"frame_rate", info.type == VIDE ? info.format.video.frame_rate : 0}});
+        }
+        host_log_json("src.get_stream_info", log_payload);
+        return out;
+    }
     if (method == "src.get_duration") { auto f = src<unsigned long (*)(Bambu_Tunnel)>("Bambu_GetDuration"); auto t = lookup_tunnel(); return f && t ? nlohmann::json{{"ok", true}, {"value", f(t)}} : not_supported(method); }
     if (method == "src.seek") { auto f = src<int (*)(Bambu_Tunnel, unsigned long)>("Bambu_Seek"); auto t = lookup_tunnel(); return f && t ? nlohmann::json{{"ok", true}, {"value", f(t, payload.value("time", 0UL))}} : not_supported(method); }
     if (method == "src.send_message") {
@@ -1670,6 +1724,9 @@ nlohmann::json LinuxRuntimeHost::handle(const std::string& method, const nlohman
                 j["__binary_pending"] = true;
             }
         }
+        static int read_sample_log_budget = 20;
+        if (ret != Bambu_would_block || read_sample_log_budget-- > 0)
+            host_log_json("src.read_sample", {{"value", ret}, {"size", ret == 0 ? sample.size : 0}, {"flags", ret == 0 ? sample.flags : 0}, {"tunnel", payload.value("tunnel", 0LL)}});
         return j;
     }
     if (method == "src.close") { auto f = src<void (*)(Bambu_Tunnel)>("Bambu_Close"); auto t = lookup_tunnel(); if (!f || !t) return not_supported(method); f(t); return {{"ok", true}, {"value", 0}}; }

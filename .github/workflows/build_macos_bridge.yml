@@ -116,16 +116,27 @@ jobs:
         run: |
           ./build_release_macos.sh -s -n -x -1 -a arm64 -t 11.3
 
-      - name: Pack macOS arm64 app bundle
+      - name: Create macOS arm64 DMG
         shell: bash
         run: |
-          tar -czvf BambuStudio-OrcaSlicer_Mac_bundle_arm64_${{ github.sha }}.tar.gz -C build/arm64 OrcaSlicer
+          set -euo pipefail
+          mkdir -p "$GITHUB_WORKSPACE/build/arm64/BambuStudio_dmg"
+          rm -rf "$GITHUB_WORKSPACE/build/arm64/BambuStudio_dmg"/*
+          cp -R "$GITHUB_WORKSPACE/build/arm64/OrcaSlicer/BambuStudio.app" "$GITHUB_WORKSPACE/build/arm64/BambuStudio_dmg/"
+          ln -sfn /Applications "$GITHUB_WORKSPACE/build/arm64/BambuStudio_dmg/Applications"
+          ver=$(grep 'set(SoftFever_VERSION' version.inc | cut -d '"' -f2)
+          hdiutil create -volname "BambuStudio" -srcfolder "$GITHUB_WORKSPACE/build/arm64/BambuStudio_dmg" -ov -format UDZO "$GITHUB_WORKSPACE/BambuStudio-OrcaSlicer_Mac_arm64_V${ver}.dmg"
 
-      - name: Upload macOS arm64 app bundle
+      - name: Explain skipped hosted runtime validation
+        shell: bash
+        run: |
+          echo "Hosted macOS runners do not support nested virtualization, so bundled Lima runtime validation is intentionally skipped here."
+
+      - name: Upload macOS arm64 DMG
         uses: actions/upload-artifact@v7
         with:
-          name: BambuStudio-OrcaSlicer_Mac_bundle_arm64_${{ github.sha }}
-          path: ${{ github.workspace }}/BambuStudio-OrcaSlicer_Mac_bundle_arm64_${{ github.sha }}.tar.gz
+          name: BambuStudio-OrcaSlicer_Mac_arm64_${{ github.sha }}
+          path: ${{ github.workspace }}/BambuStudio-OrcaSlicer_Mac_arm64_V*.dmg
           if-no-files-found: error
 
   build_macos_x86_64:
@@ -185,75 +196,25 @@ jobs:
         run: |
           ./build_release_macos.sh -s -n -x -1 -a x86_64 -t 11.3
 
-      - name: Pack macOS x86_64 app bundle
+      - name: Create macOS x86_64 DMG
         shell: bash
         run: |
-          tar -czvf BambuStudio-OrcaSlicer_Mac_bundle_x86_64_${{ github.sha }}.tar.gz -C build/x86_64 OrcaSlicer
-
-      - name: Upload macOS x86_64 app bundle
-        uses: actions/upload-artifact@v7
-        with:
-          name: BambuStudio-OrcaSlicer_Mac_bundle_x86_64_${{ github.sha }}
-          path: ${{ github.workspace }}/BambuStudio-OrcaSlicer_Mac_bundle_x86_64_${{ github.sha }}.tar.gz
-          if-no-files-found: error
-
-  build_macos_universal:
-    name: Build macOS universal
-    runs-on: macos-14
-    needs:
-      - build_macos_arm64
-      - build_macos_x86_64
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-        with:
-          lfs: 'false'
-
-      - uses: lukka/get-cmake@latest
-        with:
-          cmakeVersion: "~4.3.0"
-          useLocalCache: true
-          useCloudCache: true
-
-      - name: Download macOS app bundles
-        uses: actions/download-artifact@v8
-        with:
-          pattern: BambuStudio-OrcaSlicer_Mac_bundle_*_${{ github.sha }}
-          path: ${{ github.workspace }}/mac_bundles
-
-      - name: Extract macOS app bundles
-        shell: bash
-        run: |
-          mkdir -p build/arm64 build/x86_64
-          arm_bundle=$(find "$GITHUB_WORKSPACE/mac_bundles/BambuStudio-OrcaSlicer_Mac_bundle_arm64_${{ github.sha }}" -name '*.tar.gz' -print -quit)
-          x86_bundle=$(find "$GITHUB_WORKSPACE/mac_bundles/BambuStudio-OrcaSlicer_Mac_bundle_x86_64_${{ github.sha }}" -name '*.tar.gz' -print -quit)
-          tar -xzvf "$arm_bundle" -C "$GITHUB_WORKSPACE/build/arm64"
-          tar -xzvf "$x86_bundle" -C "$GITHUB_WORKSPACE/build/x86_64"
-
-      - name: Build universal mac app bundle
-        shell: bash
-        run: |
-          ./build_release_macos.sh -u -x -1 -a universal -t 11.3
-
-      - name: Create DMG without runtime validation
-        shell: bash
-        run: |
-          mkdir -p "$GITHUB_WORKSPACE/build/universal/BambuStudio_dmg"
-          rm -rf "$GITHUB_WORKSPACE/build/universal/BambuStudio_dmg"/*
-          cp -R "$GITHUB_WORKSPACE/build/universal/OrcaSlicer/BambuStudio.app" "$GITHUB_WORKSPACE/build/universal/BambuStudio_dmg/"
-          ln -sfn /Applications "$GITHUB_WORKSPACE/build/universal/BambuStudio_dmg/Applications"
+          set -euo pipefail
+          mkdir -p "$GITHUB_WORKSPACE/build/x86_64/BambuStudio_dmg"
+          rm -rf "$GITHUB_WORKSPACE/build/x86_64/BambuStudio_dmg"/*
+          cp -R "$GITHUB_WORKSPACE/build/x86_64/OrcaSlicer/BambuStudio.app" "$GITHUB_WORKSPACE/build/x86_64/BambuStudio_dmg/"
+          ln -sfn /Applications "$GITHUB_WORKSPACE/build/x86_64/BambuStudio_dmg/Applications"
           ver=$(grep 'set(SoftFever_VERSION' version.inc | cut -d '"' -f2)
-          hdiutil create -volname "BambuStudio" -srcfolder "$GITHUB_WORKSPACE/build/universal/BambuStudio_dmg" -ov -format UDZO "BambuStudio-OrcaSlicer_Mac_universal_V${ver}.dmg"
+          hdiutil create -volname "BambuStudio" -srcfolder "$GITHUB_WORKSPACE/build/x86_64/BambuStudio_dmg" -ov -format UDZO "$GITHUB_WORKSPACE/BambuStudio-OrcaSlicer_Mac_x86_64_V${ver}.dmg"
 
       - name: Explain skipped hosted runtime validation
         shell: bash
         run: |
           echo "Hosted macOS runners do not support nested virtualization, so bundled Lima runtime validation is intentionally skipped here."
 
-      - name: Upload macOS universal DMG
+      - name: Upload macOS x86_64 DMG
         uses: actions/upload-artifact@v7
         with:
-          name: BambuStudio-OrcaSlicer_Mac_universal_${{ github.sha }}
-          path: ${{ github.workspace }}/BambuStudio-OrcaSlicer_Mac_universal_V*.dmg
+          name: BambuStudio-OrcaSlicer_Mac_x86_64_${{ github.sha }}
+          path: ${{ github.workspace }}/BambuStudio-OrcaSlicer_Mac_x86_64_V*.dmg
           if-no-files-found: error

@@ -11,6 +11,7 @@
 #include "wx/uri.h"
 #include "wx/mediactrl.h"
 #include "wx/timer.h"
+#include <wx/bitmap.h>
 #include "../Utils/FrameBuffer.hpp"
 #include <atomic>
 
@@ -18,13 +19,6 @@ wxDECLARE_EVENT(EVT_MEDIA_CTRL_STAT, wxCommandEvent);
 wxDECLARE_EVENT(EVT_MEDIA_CTRL_FIRST_FRAME, wxCommandEvent);
 
 void wxMediaCtrl_OnSize(wxWindow * ctrl, wxSize const & videoSize, int width, int height);
-
-#ifdef __WXMAC__
-
-#include "wxMediaCtrl2.h"
-#define wxMediaCtrl3 wxMediaCtrl2
-
-#else
 
 #define BAMBU_DYNAMIC
 #include <condition_variable>
@@ -111,7 +105,5 @@ private:
     wxTimer m_render_timer;
     std::atomic<bool> m_need_refresh{false};
 };
-
-#endif
 
 #endif /* wxMediaCtrl3_h */

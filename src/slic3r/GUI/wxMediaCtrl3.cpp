@@ -11,7 +11,9 @@
 #include <shellapi.h>
 #endif
 
-//wxDEFINE_EVENT(EVT_MEDIA_CTRL_STAT, wxCommandEvent);
+#if defined(__WXMAC__)
+wxDEFINE_EVENT(EVT_MEDIA_CTRL_STAT, wxCommandEvent);
+#endif
 
 BEGIN_EVENT_TABLE(wxMediaCtrl3, wxWindow)
 
@@ -38,6 +40,7 @@ wxMediaCtrl3::wxMediaCtrl3(wxWindow *parent)
 
 wxMediaCtrl3::~wxMediaCtrl3()
 {
+    m_render_timer.Stop();
     {
         std::unique_lock<std::mutex> lk(m_ui_mutex);
         m_frame = wxImage(m_idle_image);
@@ -82,7 +85,7 @@ void wxMediaCtrl3::Stop()
     m_url.reset();
     NotifyStopped();
     m_cond.notify_all();
-    Refresh();
+    CallAfter([this] { Refresh(); });
 }
 
 void wxMediaCtrl3::SetIdleImage(wxString const &image, wxString const &watermark_text)
@@ -179,7 +182,11 @@ void wxMediaCtrl3::paintEvent(wxPaintEvent &evt)
         dc.SetUserScale(scale, scale);
         size3 = (size3 - size2) / 2;
     }
+#ifdef _WIN32
     dc.DrawBitmap(current_frame, size3.x, size3.y);
+#else
+    dc.DrawBitmap(wxBitmap(current_frame), size3.x, size3.y);
+#endif
 
     // Draw watermark overlay when showing device preview image
     if (!m_watermark_text.empty() && m_url == nullptr) {
@@ -282,10 +289,11 @@ void wxMediaCtrl3::PlayThread()
         frameCount     = 0;
         lastSecondTime = std::chrono::system_clock::now();
 
+        const auto uri_utf8 = url->BuildURI().ToUTF8();
         lk.unlock();
         Bambu_Tunnel tunnel = nullptr;
         auto t0 = std::chrono::steady_clock::now();
-        int error = Bambu_Create(&tunnel, m_url->BuildURI().ToUTF8());
+        int error = Bambu_Create(&tunnel, uri_utf8.data());
         if (error == 0) {
             Bambu_SetLogger(tunnel, &wxMediaCtrl3::bambu_log, this);
             error = Bambu_Open(tunnel);
@@ -322,24 +330,74 @@ void wxMediaCtrl3::PlayThread()
                                     << std::chrono::duration_cast<std::chrono::milliseconds>(t_stream_end - t_stream_start).count()
                                     << "ms, error=" << error;
         }
-        Bambu_StreamInfo info;
-        if (error == 0)
-            error = Bambu_GetStreamInfo(tunnel, 0, &info);
+        Bambu_StreamInfo info{};
+        int video_stream_index = 0;
+        int stream_count = 0;
+        if (error == 0) {
+            stream_count = Bambu_GetStreamCount ? Bambu_GetStreamCount(tunnel) : 0;
+            BOOST_LOG_TRIVIAL(info) << "wxMediaCtrl3: Bambu_GetStreamCount returned " << stream_count;
+            if (stream_count > 0) {
+                error = -1;
+                for (int i = 0; i < stream_count; ++i) {
+                    Bambu_StreamInfo candidate{};
+                    int info_error = Bambu_GetStreamInfo(tunnel, i, &candidate);
+                    BOOST_LOG_TRIVIAL(info) << "wxMediaCtrl3: stream " << i
+                                            << " info_error=" << info_error
+                                            << " type=" << candidate.type
+                                            << " sub_type=" << candidate.sub_type
+                                            << " width=" << (candidate.type == VIDE ? candidate.format.video.width : 0)
+                                            << " height=" << (candidate.type == VIDE ? candidate.format.video.height : 0)
+                                            << " frame_rate=" << (candidate.type == VIDE ? candidate.format.video.frame_rate : 0);
+                    if (info_error == 0 && candidate.type == VIDE) {
+                        info = candidate;
+                        video_stream_index = i;
+                        error = 0;
+                        break;
+                    }
+                }
+            } else {
+                error = Bambu_GetStreamInfo(tunnel, 0, &info);
+            }
+        }
+        if (error == 0 && info.type != VIDE) {
+            BOOST_LOG_TRIVIAL(warning) << "wxMediaCtrl3: selected stream is not video, type=" << info.type;
+            error = -1;
+        }
+        if (error == 0 && (info.format.video.width <= 0 || info.format.video.height <= 0)) {
+            BOOST_LOG_TRIVIAL(warning) << "wxMediaCtrl3: invalid video size " << info.format.video.width << "x" << info.format.video.height;
+            error = -1;
+        }
+        int frame_rate = 30;
+        if (error == 0) {
+            frame_rate = info.format.video.frame_rate > 0 ? info.format.video.frame_rate : 30;
+            if (info.format.video.frame_rate <= 0)
+                BOOST_LOG_TRIVIAL(warning) << "wxMediaCtrl3: invalid frame_rate=" << info.format.video.frame_rate << ", using 30";
+        }
         AVVideoDecoder decoder;
         if (error == 0) {
-            decoder.open(info);
+            error = decoder.open(info);
+        }
+        if (error == 0) {
+            BOOST_LOG_TRIVIAL(info) << "wxMediaCtrl3: selected video stream " << video_stream_index
+                                    << " " << info.format.video.width << "x" << info.format.video.height
+                                    << " fps=" << frame_rate
+                                    << " sub_type=" << info.sub_type
+                                    << " format_type=" << info.format_type;
             m_video_size = { info.format.video.width, info.format.video.height };
             adjust_frame_size(m_frame_size, m_video_size, GetSize());
             NotifyStopped();
-            size_t buffer_cap = (size_t) (m_buffer_time * info.format.video.frame_rate / 1000);
+            size_t buffer_cap = (size_t) (m_buffer_time * frame_rate / 1000);
             if (buffer_cap == 0) {
                 buffer_cap = 1;
             }
             m_frame_buffer.set_capacity(buffer_cap);
             m_get_frame_exit.store(false);
-            m_get_frame_thread = std::thread(&wxMediaCtrl3::GetFrameThread, this, info.format.video.frame_rate);
+            m_get_frame_thread = std::thread(&wxMediaCtrl3::GetFrameThread, this, frame_rate);
             m_need_refresh.store(false);
-            m_render_timer.Start(1000 / (info.format.video.frame_rate + 5));
+            int render_interval = 1000 / (frame_rate + 5);
+            if (render_interval < 1)
+                render_interval = 1;
+            CallAfter([this, render_interval] { m_render_timer.Start(render_interval); });
         }
         Bambu_Sample sample;
         while (error == 0) {
@@ -357,6 +415,8 @@ void wxMediaCtrl3::PlayThread()
                 lk.lock();
             }
             if (error == 0) {
+                if (stream_count > 1 && sample.itrack != video_stream_index)
+                    continue;
                 auto frame_size = m_frame_size;
                 lk.unlock();
                 PlayFrame bm;
@@ -365,6 +425,8 @@ void wxMediaCtrl3::PlayThread()
                 auto end_decode = std::chrono::steady_clock::now();
 #ifdef _WIN32
                 decoder.toWxBitmap(bm, frame_size);
+#elif defined(__WXMAC__)
+                decoder.toWxImageOwned(bm, frame_size);
 #else
                 decoder.toWxImage(bm, frame_size);
 #endif
@@ -415,7 +477,7 @@ void wxMediaCtrl3::PlayThread()
             tunnel = nullptr;
             lk.lock();
         }
-        m_render_timer.Stop();
+        CallAfter([this] { m_render_timer.Stop(); });
         if (m_url == url)
             m_error = error;
         m_frame_size = wxDefaultSize;

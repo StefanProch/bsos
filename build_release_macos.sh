@@ -254,6 +254,7 @@ function build_slicer() {
                     -DCMAKE_BUILD_TYPE="$BUILD_CONFIG" \
                     -DCMAKE_OSX_ARCHITECTURES="${_ARCH}" \
                     -DCMAKE_OSX_DEPLOYMENT_TARGET="${OSX_DEPLOYMENT_TARGET}" \
+                    -DCMAKE_PREFIX_PATH="$DEPS/usr/local" \
                     -DCMAKE_IGNORE_PREFIX_PATH="${CMAKE_IGNORE_PREFIX_PATH}" \
                     ${CMAKE_POLICY_COMPAT}
             fi
@@ -378,6 +379,46 @@ function build_slicer() {
                 "$runtime_dst/slicer_linux_runtime_host_abi1" \
                 "$runtime_dst/slicer_linux_runtime_host_abi0" \
                 "$runtime_dst/ld-linux-x86-64.so.2"
+
+            frameworks_dst="./$APP_BUNDLE_NAME/Contents/Frameworks"
+            mkdir -p "$frameworks_dst"
+            deps_lib_dir="$DEPS/usr/local/lib"
+            for ffmpeg_pattern in libavcodec*.dylib libavutil*.dylib libswscale*.dylib libswresample*.dylib; do
+                found_ffmpeg=0
+                for ffmpeg_lib in "$deps_lib_dir"/$ffmpeg_pattern; do
+                    if [ -f "$ffmpeg_lib" ]; then
+                        cp -f "$ffmpeg_lib" "$frameworks_dst/$(basename "$ffmpeg_lib")"
+                        found_ffmpeg=1
+                    fi
+                done
+                if [ "$found_ffmpeg" -eq 0 ] && [ "$ffmpeg_pattern" != "libswresample*.dylib" ]; then
+                    echo "Missing macOS FFmpeg runtime file matching $deps_lib_dir/$ffmpeg_pattern"
+                    exit 1
+                fi
+            done
+
+            fix_ffmpeg_refs() {
+                local target="$1"
+                [ -f "$target" ] || return 0
+                otool -L "$target" | awk 'NR > 1 {print $1}' | while IFS= read -r dep; do
+                    case "$(basename "$dep")" in
+                        libavcodec*.dylib|libavutil*.dylib|libswscale*.dylib|libswresample*.dylib)
+                            install_name_tool -change "$dep" "@rpath/$(basename "$dep")" "$target" 2>/dev/null || true
+                            ;;
+                    esac
+                done
+            }
+
+            app_binary="./$APP_BUNDLE_NAME/Contents/MacOS/BambuStudio"
+            install_name_tool -add_rpath "@executable_path/../Frameworks" "$app_binary" 2>/dev/null || true
+
+            for ffmpeg_lib in "$frameworks_dst"/libavcodec*.dylib "$frameworks_dst"/libavutil*.dylib "$frameworks_dst"/libswscale*.dylib "$frameworks_dst"/libswresample*.dylib; do
+                if [ -f "$ffmpeg_lib" ]; then
+                    install_name_tool -id "@rpath/$(basename "$ffmpeg_lib")" "$ffmpeg_lib" 2>/dev/null || true
+                    fix_ffmpeg_refs "$ffmpeg_lib"
+                fi
+            done
+            fix_ffmpeg_refs "$app_binary"
 
             find ./$APP_BUNDLE_NAME/ -name '.DS_Store' -delete
             
