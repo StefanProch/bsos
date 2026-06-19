@@ -430,6 +430,22 @@ function build_slicer() {
                 # delete .DS_Store file
                 find ./OrcaSlicer_profile_validator.app/ -name '.DS_Store' -delete
             fi
+
+            sign_identity="${MACOS_CODESIGN_IDENTITY:-${CERTIFICATE_ID:-}}"
+            sign_args=(--force --deep --verbose)
+            if [ -n "$sign_identity" ]; then
+                sign_args+=(--options runtime --timestamp --entitlements "$PROJECT_DIR/scripts/disable_validation.entitlements" --sign "$sign_identity")
+                echo "Signing macOS app with identity: $sign_identity"
+            else
+                sign_args+=(--sign -)
+                echo "Signing macOS app with ad-hoc identity"
+            fi
+
+            if [ -d ./OrcaSlicer_profile_validator.app ]; then
+                codesign "${sign_args[@]}" ./OrcaSlicer_profile_validator.app
+            fi
+            codesign "${sign_args[@]}" ./$APP_BUNDLE_NAME
+            codesign --verify --deep --strict --verbose=4 ./$APP_BUNDLE_NAME
         )
 
         # extract version
