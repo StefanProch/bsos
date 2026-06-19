@@ -87,7 +87,7 @@ MediaFilePanel::MediaFilePanel(wxWindow * parent)
     m_button_video = new ::Button(m_type_panel, _L("Video"), "", wxBORDER_NONE);
     m_button_video->SetToolTip(_L("Switch to video files."));
     m_button_model = new ::Button(m_type_panel, _L("Model"), "", wxBORDER_NONE);
-    m_button_video->SetToolTip(_L("Switch to 3MF model files."));
+    m_button_model->SetToolTip(_L("Switch to 3MF model files."));
     for (auto b : {m_button_timelapse, m_button_video, m_button_model}) {
         b->SetBackgroundColor(background);
         b->SetCanFocus(false);
@@ -198,7 +198,8 @@ MediaFilePanel::MediaFilePanel(wxWindow * parent)
     m_button_timelapse->Bind(wxEVT_COMMAND_BUTTON_CLICKED, type_button_clicked);
     m_button_video->Bind(wxEVT_COMMAND_BUTTON_CLICKED, type_button_clicked);
     m_button_model->Bind(wxEVT_COMMAND_BUTTON_CLICKED, type_button_clicked);
-    m_button_timelapse->SetValue(true);
+    m_last_type = PrinterFileSystem::F_MODEL;
+    m_button_model->SetValue(true);
 
     // File management
     m_button_management->Bind(wxEVT_COMMAND_BUTTON_CLICKED, [this](auto &e) {

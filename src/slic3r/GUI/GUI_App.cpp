@@ -13,6 +13,8 @@
 #include <boost/log/detail/native_typeof.hpp>
 #include <libslic3r/Config.hpp>
 #include <mutex>
+#include <map>
+#include <vector>
 #include <wx/event.h>
 
 // Localization headers: include libslic3r version first so everything in this file
@@ -1550,6 +1552,27 @@ void GUI_App::restart_networking()
 
 // Network plugin hot reload timeout constants (in milliseconds)
 namespace {
+    std::mutex s_cached_login_payloads_mutex;
+    std::map<std::string, std::string> s_cached_login_payloads;
+
+    void remember_login_payload(const std::string& provider, const std::string& payload)
+    {
+        std::lock_guard<std::mutex> lock(s_cached_login_payloads_mutex);
+        s_cached_login_payloads[provider] = payload;
+    }
+
+    void forget_login_payload(const std::string& provider)
+    {
+        std::lock_guard<std::mutex> lock(s_cached_login_payloads_mutex);
+        s_cached_login_payloads.erase(provider);
+    }
+
+    std::vector<std::pair<std::string, std::string>> cached_login_payloads()
+    {
+        std::lock_guard<std::mutex> lock(s_cached_login_payloads_mutex);
+        return std::vector<std::pair<std::string, std::string>>(s_cached_login_payloads.begin(), s_cached_login_payloads.end());
+    }
+
     constexpr int CALLBACK_DRAIN_TIMEOUT_MS   = 200;  // Time to drain pending CallAfter callbacks
     constexpr int NETWORK_IDLE_TIMEOUT_MS     = 500;  // Max wait for network operations to complete
     constexpr int FINAL_DRAIN_TIMEOUT_MS      = 100;  // Final event processing before destruction
@@ -1694,6 +1717,16 @@ bool GUI_App::hot_reload_network_plugin()
 
     std::string loaded_version = Slic3r::NetworkAgent::get_version();
     bool success = m_agent != nullptr && !loaded_version.empty() && loaded_version != "00.00.00.00";
+    if (success && m_agent) {
+        for (const auto& login : cached_login_payloads()) {
+            if (!login.second.empty() && !m_agent->is_user_login(login.first)) {
+                int ret = m_agent->change_user(login.second, login.first);
+                BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": replay cached login for " << login.first << ", ret=" << ret;
+                if (ret == 0 && m_agent->is_user_login(login.first))
+                    request_user_login(1, login.first);
+            }
+        }
+    }
     bool user_logged_in = m_agent && m_agent->is_user_login();
     BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": after restart_networking, is_user_login = " << user_logged_in
                             << ", m_agent = " << (m_agent ? "valid" : "null")
@@ -4951,6 +4984,7 @@ void GUI_App::post_logout_to_webview(const std::string& provider)
 
 void GUI_App::request_user_logout(const std::string& provider/* = ORCA_CLOUD_PROVIDER*/)
 {
+    forget_login_payload(provider);
     if (m_agent && m_agent->is_user_login(provider)) {
         const std::string logged_out_user_id = m_agent->get_user_id(provider);
         m_agent->user_logout(true, provider);
@@ -5264,8 +5298,10 @@ void GUI_App::handle_script_message(std::string msg, const std::string& provider
         if (j.contains("command")) {
             wxString cmd = j["command"];
             if (cmd == "user_login") {
+                const std::string payload = j.dump();
+                remember_login_payload(provider, payload);
                 if (m_agent) {
-                    m_agent->change_user(j.dump(), provider);
+                    m_agent->change_user(payload, provider);
                     if (m_agent->is_user_login(provider)) {
                         request_user_login(1, provider);
                     }

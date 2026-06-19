@@ -157,7 +157,26 @@ jobs:
       - name: Install nsis
         shell: pwsh
         run: |
-          choco install nsis -y
+          $ErrorActionPreference = "Stop"
+          $nsisBin = "${env:ProgramFiles(x86)}\NSIS\Bin"
+          $makensis = Join-Path $nsisBin "makensis.exe"
+
+          if (!(Test-Path $makensis)) {
+            for ($i = 1; $i -le 3; $i++) {
+              choco install nsis -y --no-progress
+              if ($LASTEXITCODE -eq 0) { break }
+              if ($i -eq 3) { throw "choco install nsis failed" }
+              Start-Sleep -Seconds (15 * $i)
+            }
+          }
+
+          if (!(Test-Path $makensis)) {
+            throw "makensis.exe not found after NSIS install"
+          }
+
+          $env:PATH = "$nsisBin;$env:PATH"
+          Add-Content -Path $env:GITHUB_PATH -Value $nsisBin
+          & $makensis /VERSION
 
       - name: Build Windows deps
         working-directory: ${{ github.workspace }}
