@@ -22,6 +22,18 @@ EVT_PAINT(wxMediaCtrl3::paintEvent)
 
 END_EVENT_TABLE()
 
+
+static std::string wxmedia_safe_log_text(const std::string& value)
+{
+    if (value.find("bambu:///") != std::string::npos ||
+        value.find("authkey=") != std::string::npos ||
+        value.find("passwd=") != std::string::npos ||
+        value.find("token=") != std::string::npos ||
+        value.find("license=") != std::string::npos)
+        return "<redacted len=" + std::to_string(value.size()) + ">";
+    return value;
+}
+
 struct StaticBambuLib : BambuLib
 {
     static StaticBambuLib &get(BambuLib *);
@@ -376,7 +388,7 @@ void wxMediaCtrl3::PlayThread()
                 break;
             std::string last_error = wxmedia_bambu_last_error(*this);
             if (!last_error.empty())
-                BOOST_LOG_TRIVIAL(info) << "wxMediaCtrl3: Bambu_Create attempt=" << attempt << ", last_error=" << last_error;
+                BOOST_LOG_TRIVIAL(info) << "wxMediaCtrl3: Bambu_Create attempt=" << attempt << ", last_error=" << wxmedia_safe_log_text(last_error);
             if (tunnel) {
                 if (Bambu_Close) Bambu_Close(tunnel);
                 if (Bambu_Destroy) Bambu_Destroy(tunnel);
@@ -411,7 +423,7 @@ void wxMediaCtrl3::PlayThread()
             if (error != 0) {
                 std::string last_error = wxmedia_bambu_last_error(*this);
                 if (!last_error.empty())
-                    BOOST_LOG_TRIVIAL(info) << "wxMediaCtrl3: Bambu_Create last_error=" << last_error;
+                    BOOST_LOG_TRIVIAL(info) << "wxMediaCtrl3: Bambu_Create last_error=" << wxmedia_safe_log_text(last_error);
             }
         }
 #endif
@@ -425,7 +437,7 @@ void wxMediaCtrl3::PlayThread()
             if (error != 0) {
                 std::string last_error = wxmedia_bambu_last_error(*this);
                 if (!last_error.empty())
-                    BOOST_LOG_TRIVIAL(info) << "wxMediaCtrl3: Bambu_Open last_error=" << last_error;
+                    BOOST_LOG_TRIVIAL(info) << "wxMediaCtrl3: Bambu_Open last_error=" << wxmedia_safe_log_text(last_error);
             }
             if (error == 0)
                 error = Bambu_would_block;
@@ -459,7 +471,7 @@ void wxMediaCtrl3::PlayThread()
             if (error != 0) {
                 std::string last_error = wxmedia_bambu_last_error(*this);
                 if (!last_error.empty())
-                    BOOST_LOG_TRIVIAL(info) << "wxMediaCtrl3: Bambu_StartStream last_error=" << last_error;
+                    BOOST_LOG_TRIVIAL(info) << "wxMediaCtrl3: Bambu_StartStream last_error=" << wxmedia_safe_log_text(last_error);
             }
         }
         Bambu_StreamInfo info{};
@@ -591,7 +603,7 @@ void wxMediaCtrl3::PlayThread()
         }
         if (error != 0 && error != 1) {
             std::string last_error = wxmedia_bambu_last_error(*this);
-            BOOST_LOG_TRIVIAL(info) << "wxMediaCtrl3: stream finished with error=" << error << (last_error.empty() ? "" : (", last_error=" + last_error));
+            BOOST_LOG_TRIVIAL(info) << "wxMediaCtrl3: stream finished with error=" << error << (last_error.empty() ? "" : (", last_error=" + wxmedia_safe_log_text(last_error)));
         }
         if (m_get_frame_thread.joinable()) {
             m_get_frame_exit.store(true);

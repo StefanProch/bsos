@@ -19,6 +19,8 @@
 #include <filesystem>
 #include <fstream>
 #include <unistd.h>
+#include <algorithm>
+#include <cctype>
 
 using namespace std::chrono_literals;
 
@@ -104,6 +106,147 @@ std::string trim_for_log(const std::string& value, std::size_t limit = 8192)
     return value.substr(0, limit) + "...<truncated>";
 }
 
+std::string lower_ascii(std::string value)
+{
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return value;
+}
+
+bool contains_ascii_ci(const std::string& value, const std::string& needle)
+{
+    return lower_ascii(value).find(lower_ascii(needle)) != std::string::npos;
+}
+
+bool sensitive_log_key(const std::string& key)
+{
+    const std::string k = lower_ascii(key);
+    return k.find("token") != std::string::npos ||
+           k.find("passwd") != std::string::npos ||
+           k.find("password") != std::string::npos ||
+           k.find("authkey") != std::string::npos ||
+           k == "authorization" ||
+           k == "cookie" ||
+           k == "set-cookie" ||
+           k == "ticket" ||
+           k == "license" ||
+           k == "access_code" ||
+           k == "user_access_code" ||
+           k == "sec_link" ||
+           k == "http_body" ||
+           k == "login_cmd" ||
+           k == "logout_cmd" ||
+           k == "login_info" ||
+           k == "user_info" ||
+           k == "user_info_original" ||
+           k == "user_info_normalized" ||
+           k == "headers";
+}
+
+bool private_identifier_log_key(const std::string& key)
+{
+    const std::string k = lower_ascii(key);
+    return k == "dev_id" ||
+           k == "sdev_id" ||
+           k == "device" ||
+           k == "serial" ||
+           k == "sn" ||
+           k == "uid" ||
+           k == "user_id" ||
+           k == "username" ||
+           k == "user_name" ||
+           k == "user_nickname" ||
+           k == "user_avatar" ||
+           k == "email";
+}
+
+std::string redact_len(const std::string& value)
+{
+    return "<redacted len=" + std::to_string(value.size()) + ">";
+}
+
+std::string mask_identifier(const std::string& value)
+{
+    if (value.empty())
+        return {};
+    if (value.size() <= 8)
+        return "<id len=" + std::to_string(value.size()) + ">";
+    return value.substr(0, 4) + "..." + value.substr(value.size() - 4) + " (len=" + std::to_string(value.size()) + ")";
+}
+
+std::string mask_private_ip(const std::string& value)
+{
+    const auto last_dot = value.rfind('.');
+    if (last_dot == std::string::npos)
+        return mask_identifier(value);
+    return value.substr(0, last_dot + 1) + "x";
+}
+
+bool has_url_param_ci(const std::string& value, const std::string& key)
+{
+    const std::string lower = lower_ascii(value);
+    const std::string k = lower_ascii(key);
+    return lower.find("?" + k + "=") != std::string::npos ||
+           lower.find("&" + k + "=") != std::string::npos;
+}
+
+std::string bambu_url_summary(const std::string& value)
+{
+    std::string kind = "unknown";
+    constexpr const char* prefix = "bambu:///";
+    if (value.rfind(prefix, 0) == 0) {
+        std::size_t start = std::strlen(prefix);
+        std::size_t end = value.find_first_of("/?&", start);
+        kind = value.substr(start, end == std::string::npos ? std::string::npos : end - start);
+        if (kind.empty())
+            kind = "root";
+    }
+
+    return "bambu_url{len=" + std::to_string(value.size()) +
+           ",kind=" + kind +
+           ",has_uid=" + (has_url_param_ci(value, "uid") ? "1" : "0") +
+           ",has_authkey=" + (has_url_param_ci(value, "authkey") ? "1" : "0") +
+           ",has_passwd=" + (has_url_param_ci(value, "passwd") ? "1" : "0") +
+           ",has_license=" + (has_url_param_ci(value, "license") ? "1" : "0") +
+           ",has_token=" + (has_url_param_ci(value, "token") ? "1" : "0") +
+           ",has_refresh_url=" + (has_url_param_ci(value, "refresh_url") ? "1" : "0") +
+           ",has_device=" + (has_url_param_ci(value, "device") ? "1" : "0") +
+           "}";
+}
+
+std::string sanitize_log_string(const std::string& key, const std::string& value)
+{
+    if (sensitive_log_key(key))
+        return redact_len(value);
+    if (private_identifier_log_key(key))
+        return mask_identifier(value);
+    if (key == "dev_ip" || key == "ip" || key == "lan_ip")
+        return mask_private_ip(value);
+    if (value.rfind("bambu:///", 0) == 0)
+        return bambu_url_summary(value);
+    if (contains_ascii_ci(value, "authkey=") || contains_ascii_ci(value, "passwd=") || contains_ascii_ci(value, "token=") || contains_ascii_ci(value, "access_code"))
+        return redact_len(value);
+    return value;
+}
+
+nlohmann::json sanitize_log_json(const nlohmann::json& value, const std::string& key = {})
+{
+    if (value.is_object()) {
+        nlohmann::json out = nlohmann::json::object();
+        for (auto it = value.begin(); it != value.end(); ++it)
+            out[it.key()] = sanitize_log_json(it.value(), it.key());
+        return out;
+    }
+    if (value.is_array()) {
+        nlohmann::json out = nlohmann::json::array();
+        for (const auto& item : value)
+            out.push_back(sanitize_log_json(item, key));
+        return out;
+    }
+    if (value.is_string())
+        return sanitize_log_string(key, value.get<std::string>());
+    return value;
+}
+
 
 std::string replace_url_param_value(std::string value, const std::string& key, const std::string& replacement)
 {
@@ -134,7 +277,7 @@ void host_log_json(const std::string& kind, const nlohmann::json& payload)
     try {
         nlohmann::json line;
         line["kind"] = kind;
-        line["payload"] = payload;
+        line["payload"] = sanitize_log_json(payload);
         std::string text = trim_for_log(line.dump());
         std::lock_guard<std::mutex> lock(g_host_log_mutex);
         std::cerr << "[SLRUNTIME] " << text << std::endl;
@@ -1059,15 +1202,15 @@ nlohmann::json LinuxRuntimeHost::handle(const std::string& method, const nlohman
         const auto original_user_info = payload.value("user_info", std::string());
         const auto normalized_user_info = normalize_change_user_payload_string(original_user_info);
         const int ret = f(a, normalized_user_info);
-        nlohmann::json r{{"ok", true}, {"value", ret}, {"user_info_original", original_user_info}, {"user_info_normalized", normalized_user_info}, {"user_info_was_normalized", normalized_user_info != original_user_info}};
+        nlohmann::json r{{"ok", true}, {"value", ret}, {"user_info_len", original_user_info.size()}, {"user_info_was_normalized", normalized_user_info != original_user_info}};
         auto g1 = net<bool (*)(void*)>("bambu_network_is_user_login"); if (g1) r["logged_in"] = g1(a);
-        auto g2 = net<std::string (*)(void*)>("bambu_network_get_user_id"); if (g2) r["user_id"] = g2(a);
-        auto g3 = net<std::string (*)(void*)>("bambu_network_get_user_name"); if (g3) r["user_name"] = g3(a);
-        auto g4 = net<std::string (*)(void*)>("bambu_network_get_user_avatar"); if (g4) r["user_avatar"] = g4(a);
-        auto g5 = net<std::string (*)(void*)>("bambu_network_get_user_nickanme"); if (g5) r["user_nickname"] = g5(a);
-        auto g6 = net<std::string (*)(void*)>("bambu_network_build_login_cmd"); if (g6) r["login_cmd"] = g6(a);
-        auto g7 = net<std::string (*)(void*)>("bambu_network_build_logout_cmd"); if (g7) r["logout_cmd"] = g7(a);
-        auto g8 = net<std::string (*)(void*)>("bambu_network_build_login_info"); if (g8) r["login_info"] = g8(a);
+        auto g2 = net<std::string (*)(void*)>("bambu_network_get_user_id"); if (g2) r["user_id_present"] = !g2(a).empty();
+        auto g3 = net<std::string (*)(void*)>("bambu_network_get_user_name"); if (g3) r["user_name_present"] = !g3(a).empty();
+        auto g4 = net<std::string (*)(void*)>("bambu_network_get_user_avatar"); if (g4) r["user_avatar_present"] = !g4(a).empty();
+        auto g5 = net<std::string (*)(void*)>("bambu_network_get_user_nickanme"); if (g5) r["user_nickname_present"] = !g5(a).empty();
+        auto g6 = net<std::string (*)(void*)>("bambu_network_build_login_cmd"); if (g6) r["login_cmd_present"] = !g6(a).empty();
+        auto g7 = net<std::string (*)(void*)>("bambu_network_build_logout_cmd"); if (g7) r["logout_cmd_present"] = !g7(a).empty();
+        auto g8 = net<std::string (*)(void*)>("bambu_network_build_login_info"); if (g8) r["login_info_present"] = !g8(a).empty();
         auto g9 = net<std::string (*)(void*)>("bambu_network_get_bambulab_host"); if (g9) r["bambulab_host"] = g9(a);
         host_log_json("net.change_user", r);
         return r;
@@ -1257,7 +1400,7 @@ nlohmann::json LinuxRuntimeHost::handle(const std::string& method, const nlohman
     if (method == "net.get_setting_list2") { auto f = net<int (*)(void*, std::string, CheckFn, ProgressFn, WasCancelledFn)>("bambu_network_get_setting_list2"); auto a = lookup_agent(); if (!f || !a) return not_supported(method); const auto job_id = payload.value("client_job_id", 0LL); const auto params = payload.value("params", nlohmann::json::object()); auto job = std::make_shared<HostJobState>(); job->job_id = job_id; job->agent_handle = agent_id; job->kind = "get_setting_list2"; register_job(job); const int ret = f(a, params.value("bundle_version", std::string()), [this, job](std::map<std::string, std::string> info) { const auto request_id = m_next_wait_request.fetch_add(1); { std::lock_guard<std::mutex> lock(job->wait_mutex); job->wait_request_id = request_id; job->wait_reply_ready = false; job->wait_reply_value = true; } queue_event(job->agent_handle, "job.check", {{"job_id", job->job_id}, {"kind", job->kind}, {"request_id", request_id}, {"info", info}}); std::unique_lock<std::mutex> lock(job->wait_mutex); job->wait_cv.wait(lock, [&] { return job->wait_reply_ready && job->wait_request_id == request_id; }); return job->wait_reply_value; }, [this, job](int progress) { queue_event(job->agent_handle, "job.progress", {{"job_id", job->job_id}, {"kind", job->kind}, {"progress", progress}}); }, [job]() { return job->cancel_requested.load(); }); unregister_job(job_id); return {{"ok", true}, {"value", ret}, {"job_id", job_id}}; }
     if (method == "net.put_setting") { auto f = net<int (*)(void*, std::string, std::string, std::map<std::string, std::string>*, unsigned int*)>("bambu_network_put_setting"); auto a = lookup_agent(); if (!f || !a) return not_supported(method); auto values = json_to_string_map(payload.value("values", nlohmann::json::object())); unsigned int http_code = 0; const int ret = f(a, payload.value("setting_id", std::string()), payload.value("name", std::string()), &values, &http_code); return {{"ok", true}, {"value", ret}, {"http_code", http_code}}; }
     if (method == "net.delete_setting") { auto f = net<int (*)(void*, std::string)>("bambu_network_delete_setting"); auto a = lookup_agent(); return f && a ? nlohmann::json{{"ok", true}, {"value", f(a, payload.value("setting_id", std::string()))}} : not_supported(method); }
-    if (method == "net.set_extra_http_header") { auto f = net<int (*)(void*, std::map<std::string, std::string>)>("bambu_network_set_extra_http_header"); auto a = lookup_agent(); if (!f || !a) return not_supported(method); auto headers = json_to_string_map(payload.value("headers", nlohmann::json::object())); const int ret = f(a, headers); nlohmann::json r{{"ok", true}, {"value", ret}, {"headers", headers}}; host_log_json("net.set_extra_http_header", r); return r; }
+    if (method == "net.set_extra_http_header") { auto f = net<int (*)(void*, std::map<std::string, std::string>)>("bambu_network_set_extra_http_header"); auto a = lookup_agent(); if (!f || !a) return not_supported(method); auto headers = json_to_string_map(payload.value("headers", nlohmann::json::object())); const int ret = f(a, headers); nlohmann::json r{{"ok", true}, {"value", ret}, {"header_count", headers.size()}}; host_log_json("net.set_extra_http_header", r); return r; }
     if (method == "net.get_my_message") { auto f = net<int (*)(void*, int, int, int, unsigned int*, std::string*)>("bambu_network_get_my_message"); auto a = lookup_agent(); if (!f || !a) return not_supported(method); unsigned int http_code = 0; std::string http_body; const int ret = f(a, payload.value("type", 0), payload.value("after", 0), payload.value("limit", 20), &http_code, &http_body); return {{"ok", true}, {"value", ret}, {"http_code", http_code}, {"http_body", http_body}}; }
     if (method == "net.check_user_task_report") { auto f = net<int (*)(void*, int*, bool*)>("bambu_network_check_user_task_report"); auto a = lookup_agent(); if (!f || !a) return not_supported(method); int task_id = 0; bool printable = false; const int ret = f(a, &task_id, &printable); return {{"ok", true}, {"value", ret}, {"task_id", task_id}, {"printable", printable}}; }
     if (method == "net.get_user_print_info") { auto f = net<int (*)(void*, unsigned int*, std::string*)>("bambu_network_get_user_print_info"); auto a = lookup_agent(); if (!f || !a) return not_supported(method); unsigned int http_code = 0; std::string http_body; const int ret = f(a, &http_code, &http_body); return {{"ok", true}, {"value", ret}, {"http_code", http_code}, {"http_body", http_body}}; }
