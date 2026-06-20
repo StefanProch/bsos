@@ -265,6 +265,19 @@ void wxMediaCtrl3::bambu_log(void *ctx, int level, tchar const *msg2)
     BOOST_LOG_TRIVIAL(info) << msg.ToUTF8().data();
 }
 
+static std::string wxmedia_bambu_last_error(BambuLib& lib)
+{
+    if (!lib.Bambu_GetLastErrorMsg)
+        return {};
+    const char* raw = lib.Bambu_GetLastErrorMsg();
+    std::string out = raw ? std::string(raw) : std::string();
+#ifndef _WIN32
+    if (raw && lib.Bambu_FreeLogMsg)
+        lib.Bambu_FreeLogMsg(raw);
+#endif
+    return out;
+}
+
 void wxMediaCtrl3::PlayThread()
 {
     using namespace std::chrono_literals;
@@ -290,16 +303,38 @@ void wxMediaCtrl3::PlayThread()
         lastSecondTime = std::chrono::system_clock::now();
 
         const auto uri_utf8 = url->BuildURI().ToUTF8();
+        static_cast<BambuLib&>(*this) = StaticBambuLib::get(this);
         lk.unlock();
         Bambu_Tunnel tunnel = nullptr;
         auto t0 = std::chrono::steady_clock::now();
-        int error = Bambu_Create(&tunnel, uri_utf8.data());
+        int error = -2;
+        if (!Bambu_Create) {
+            BOOST_LOG_TRIVIAL(info) << "wxMediaCtrl3: Bambu_Create function is not available";
+        } else {
+            if (Bambu_Init) {
+                int init_error = Bambu_Init();
+                BOOST_LOG_TRIVIAL(info) << "wxMediaCtrl3: Bambu_Init error=" << init_error;
+            }
+            error = Bambu_Create(&tunnel, uri_utf8.data());
+            BOOST_LOG_TRIVIAL(info) << "wxMediaCtrl3: Bambu_Create error=" << error << ", tunnel=" << (tunnel ? 1 : 0);
+            if (error != 0) {
+                std::string last_error = wxmedia_bambu_last_error(*this);
+                if (!last_error.empty())
+                    BOOST_LOG_TRIVIAL(info) << "wxMediaCtrl3: Bambu_Create last_error=" << last_error;
+            }
+        }
         if (error == 0) {
-            Bambu_SetLogger(tunnel, &wxMediaCtrl3::bambu_log, this);
-            error = Bambu_Open(tunnel);
+            if (Bambu_SetLogger)
+                Bambu_SetLogger(tunnel, &wxMediaCtrl3::bambu_log, this);
+            error = Bambu_Open ? Bambu_Open(tunnel) : -2;
             auto t1 = std::chrono::steady_clock::now();
             BOOST_LOG_TRIVIAL(info) << "wxMediaCtrl3: Bambu_Open took "
                                     << std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count() << "ms, error=" << error;
+            if (error != 0) {
+                std::string last_error = wxmedia_bambu_last_error(*this);
+                if (!last_error.empty())
+                    BOOST_LOG_TRIVIAL(info) << "wxMediaCtrl3: Bambu_Open last_error=" << last_error;
+            }
             if (error == 0)
                 error = Bambu_would_block;
 
@@ -329,6 +364,11 @@ void wxMediaCtrl3::PlayThread()
             BOOST_LOG_TRIVIAL(info) << "wxMediaCtrl3: Bambu_StartStream loop took "
                                     << std::chrono::duration_cast<std::chrono::milliseconds>(t_stream_end - t_stream_start).count()
                                     << "ms, error=" << error;
+            if (error != 0) {
+                std::string last_error = wxmedia_bambu_last_error(*this);
+                if (!last_error.empty())
+                    BOOST_LOG_TRIVIAL(info) << "wxMediaCtrl3: Bambu_StartStream last_error=" << last_error;
+            }
         }
         Bambu_StreamInfo info{};
         int video_stream_index = 0;
@@ -456,6 +496,10 @@ void wxMediaCtrl3::PlayThread()
                     m_frame_buffer.enqueue(bm);
                 }
             }
+        }
+        if (error != 0 && error != 1) {
+            std::string last_error = wxmedia_bambu_last_error(*this);
+            BOOST_LOG_TRIVIAL(info) << "wxMediaCtrl3: stream finished with error=" << error << (last_error.empty() ? "" : (", last_error=" + last_error));
         }
         if (m_get_frame_thread.joinable()) {
             m_get_frame_exit.store(true);
