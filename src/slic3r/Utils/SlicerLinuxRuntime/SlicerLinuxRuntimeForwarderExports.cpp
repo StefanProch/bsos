@@ -17,6 +17,7 @@
 #include <string>
 #include <thread>
 #include <vector>
+#include <filesystem>
 
 #if defined(_WIN32)
 #ifndef NOMINMAX
@@ -337,6 +338,19 @@ static std::string normalize_windows_runtime_path(std::string path)
 }
 #endif
 
+static std::string runtime_component_cert_folder(const std::string& filename)
+{
+    if (filename.empty())
+        return {};
+    const char* dir = std::getenv("SLICER_LINUX_RUNTIME_COMPONENT_DIR");
+    if (!dir || !*dir)
+        return {};
+    std::filesystem::path cert_path = std::filesystem::path(dir) / filename;
+    if (!std::filesystem::exists(cert_path) || std::filesystem::is_directory(cert_path))
+        return {};
+    return cert_path.parent_path().string();
+}
+
 static BBL::PrintParams normalize_runtime_paths(BBL::PrintParams params)
 {
     params.filename = normalize_windows_runtime_path(std::move(params.filename));
@@ -551,7 +565,8 @@ SLICER_LINUX_RUNTIME_EXPORT int bambu_network_set_cert_file(void* agent, std::st
 {
     auto* a = require_agent(agent);
     if (!a) return invalid_handle();
-    a->cert_dir = normalize_windows_runtime_path(std::move(folder));
+    const std::string runtime_cert_dir = runtime_component_cert_folder(filename);
+    a->cert_dir = runtime_cert_dir.empty() ? normalize_windows_runtime_path(std::move(folder)) : runtime_cert_dir;
     a->cert_file = std::move(filename);
     return RpcClient::instance().invoke_int("net.set_cert_file", {{"agent", agent_id(a)}, {"folder", a->cert_dir}, {"filename", a->cert_file}});
 }
