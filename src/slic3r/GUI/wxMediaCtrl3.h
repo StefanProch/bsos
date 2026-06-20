@@ -14,6 +14,7 @@
 #include <wx/bitmap.h>
 #include "../Utils/FrameBuffer.hpp"
 #include <atomic>
+#include <string>
 
 wxDECLARE_EVENT(EVT_MEDIA_CTRL_STAT, wxCommandEvent);
 wxDECLARE_EVENT(EVT_MEDIA_CTRL_FIRST_FRAME, wxCommandEvent);
@@ -44,6 +45,9 @@ public:
     ~wxMediaCtrl3();
 
     void Load(wxURI url, std::chrono::system_clock::time_point play_start_time = {});
+#if defined(__WXMAC__) || defined(__APPLE__)
+    void LoadRaw(wxString const &url, std::chrono::system_clock::time_point play_start_time = {});
+#endif
 
     std::chrono::system_clock::time_point m_play_start_time;
 
@@ -90,7 +94,15 @@ private:
     wxSize m_video_size = wxDefaultSize;
     wxSize m_frame_size = wxDefaultSize;
     PlayFrame m_frame;
+#if defined(__WXMAC__) || defined(__APPLE__)
+    struct MediaUrl {
+        std::string value;
+        bool has_scheme = false;
+    };
+    std::shared_ptr<MediaUrl> m_url;
+#else
     std::shared_ptr<wxURI> m_url;
+#endif
     std::mutex m_mutex;
     std::mutex m_ui_mutex;
     std::condition_variable m_cond;

@@ -18,6 +18,7 @@
 #include <thread>
 #include <vector>
 #include <filesystem>
+#include <boost/log/trivial.hpp>
 
 #if defined(_WIN32)
 #ifndef NOMINMAX
@@ -962,9 +963,16 @@ SLICER_LINUX_RUNTIME_EXPORT Slic3r::ft_err ft_job_get_msg(Slic3r::FT_JobHandle* 
 SLICER_LINUX_RUNTIME_EXPORT int Bambu_Create(Bambu_Tunnel* tunnel, char const* path)
 {
     if (!tunnel) return -1;
-    const auto j = ok_or_error(RpcClient::instance().invoke_json("src.create", {{"path", std::string(path ? path : "")}}));
+    const std::string path_value(path ? path : "");
+    const bool is_bambu = path_value.rfind("bambu:///", 0) == 0;
+    const bool is_tutk = path_value.rfind("bambu:///tutk", 0) == 0;
+    BOOST_LOG_TRIVIAL(info) << "slicer-linux-runtime-forwarder: src.create.begin path_len=" << path_value.size()
+                            << ", path_is_bambu=" << (is_bambu ? 1 : 0)
+                            << ", path_is_tutk=" << (is_tutk ? 1 : 0);
+    const auto j = ok_or_error(RpcClient::instance().invoke_json("src.create", {{"path", path_value}}));
     const int ret = j.value("value", -1);
     const auto remote = j.value("tunnel", 0LL);
+    BOOST_LOG_TRIVIAL(info) << "slicer-linux-runtime-forwarder: src.create.end value=" << ret << ", tunnel=" << remote;
     if (ret != 0 || remote == 0) {
         *tunnel = nullptr;
         return ret;

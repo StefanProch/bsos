@@ -724,7 +724,12 @@ void MediaPlayCtrl::media_proc()
         }
         else {
             BOOST_LOG_TRIVIAL(info) <<  "MediaPlayCtrl: start load";
-            m_media_ctrl->Load(wxURI(url));
+#if defined(__WXMAC__) || defined(__APPLE__)
+            if (url.StartsWith("bambu:///"))
+                m_media_ctrl->LoadRaw(url);
+            else
+#endif
+                m_media_ctrl->Load(wxURI(url));
             BOOST_LOG_TRIVIAL(info) << "MediaPlayCtrl: end load";
         }
         lock.lock();

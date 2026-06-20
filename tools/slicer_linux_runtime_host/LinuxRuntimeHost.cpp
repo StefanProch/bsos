@@ -1595,8 +1595,15 @@ nlohmann::json LinuxRuntimeHost::handle(const std::string& method, const nlohman
         const std::string path = raw_path.rfind("bambu:///", 0) == 0
             ? replace_url_param_value(raw_path, "refresh_url", refresh_agora_url_ptr_string())
             : raw_path;
+        nlohmann::json create_meta{{"path_len", path.size()},
+                                   {"path_is_bambu", path.rfind("bambu:///", 0) == 0},
+                                   {"path_is_tutk", path.rfind("bambu:///tutk", 0) == 0},
+                                   {"path_is_local", path.rfind("bambu:///local", 0) == 0},
+                                   {"has_refresh_url", path.find("refresh_url=") != std::string::npos}};
+        host_log_json("src.create.begin", create_meta);
         const int ret = f(&tunnel, path.c_str());
-        nlohmann::json log_payload{{"value", ret}, {"path_len", path.size()}, {"path_is_bambu", path.rfind("bambu:///", 0) == 0}, {"has_refresh_url", path.find("refresh_url=") != std::string::npos}};
+        nlohmann::json log_payload = create_meta;
+        log_payload["value"] = ret;
         if (ret != 0) {
             log_payload["tunnel"] = 0;
             host_log_json("src.create", log_payload);
