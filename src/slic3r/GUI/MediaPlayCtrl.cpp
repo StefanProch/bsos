@@ -46,17 +46,28 @@ static bool media_url_has_param(const std::string& url, const std::string& key)
     return url.find("?" + key + "=") != std::string::npos || url.find("&" + key + "=") != std::string::npos;
 }
 
+static std::string media_url_kind_for_log(const std::string& url)
+{
+    constexpr const char* prefix = "bambu:///";
+    if (url.rfind(prefix, 0) != 0)
+        return "unknown";
+
+    const std::size_t start = std::strlen(prefix);
+    if (start >= url.size())
+        return "root";
+
+    if (url.compare(start, 4, "tutk") == 0)
+        return "tutk";
+    if (url.compare(start, 7, "rtsp___") == 0)
+        return "rtsp";
+    if (url.compare(start, 8, "local___") == 0)
+        return "local";
+    return "other";
+}
+
 static std::string media_url_summary_for_log(const std::string& url)
 {
-    std::string kind = "unknown";
-    constexpr const char* prefix = "bambu:///";
-    if (url.rfind(prefix, 0) == 0) {
-        std::size_t start = std::strlen(prefix);
-        std::size_t end = url.find_first_of("/?&", start);
-        kind = url.substr(start, end == std::string::npos ? std::string::npos : end - start);
-        if (kind.empty())
-            kind = "root";
-    }
+    const std::string kind = media_url_kind_for_log(url);
     return "camera_url{len=" + std::to_string(url.size()) +
            ",is_bambu=" + (url.rfind("bambu:///", 0) == 0 ? "1" : "0") +
            ",kind=" + kind +
