@@ -98,6 +98,7 @@ if (APPLE)
     set(SLICER_LINUX_RUNTIME_MAC_INSTALLER_SOURCE ${CMAKE_SOURCE_DIR}/tools/slicer_linux_runtime/macos/install_runtime_macos.sh)
     set(SLICER_LINUX_RUNTIME_MAC_VERIFY_SOURCE ${CMAKE_SOURCE_DIR}/tools/slicer_linux_runtime/macos/verify_runtime_macos.sh)
     set(SLICER_LINUX_RUNTIME_MAC_INSTANCE_SOURCE ${CMAKE_SOURCE_DIR}/tools/slicer_linux_runtime/macos/slicer_linux_runtime_lima_instance.txt)
+    set(SLICER_LINUX_RUNTIME_MAC_NETWORK_PROFILE_SOURCE ${CMAKE_SOURCE_DIR}/tools/slicer_linux_runtime/macos/set_runtime_network_profile_macos.sh)
     set(SLICER_LINUX_RUNTIME_MAC_RUNTIME_SOURCE_DIR ${CMAKE_SOURCE_DIR}/tools/slicer_linux_runtime_host/runtime/linux-x86_64)
     set(SLICER_LINUX_RUNTIME_MAC_RUNTIME_FILES)
 
@@ -146,6 +147,9 @@ if (APPLE)
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${SLICER_LINUX_RUNTIME_MAC_INSTANCE_SOURCE}"
             "$<TARGET_FILE_DIR:slicer_linux_runtime>/slicer_linux_runtime_lima_instance.txt"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${SLICER_LINUX_RUNTIME_MAC_NETWORK_PROFILE_SOURCE}"
+            "$<TARGET_FILE_DIR:slicer_linux_runtime>/set_runtime_network_profile_macos.sh"
     )
 
     foreach(SLICER_LINUX_RUNTIME_MAC_RUNTIME_FILE ${SLICER_LINUX_RUNTIME_MAC_RUNTIME_FILES})
@@ -173,6 +177,10 @@ if (APPLE)
         DESTINATION "."
         RENAME slicer_linux_runtime_lima_instance.txt
     )
+    install(PROGRAMS "${SLICER_LINUX_RUNTIME_MAC_NETWORK_PROFILE_SOURCE}"
+        DESTINATION "."
+        RENAME set_runtime_network_profile_macos.sh
+    )
     if (SLICER_LINUX_RUNTIME_MAC_RUNTIME_FILES)
         install(FILES ${SLICER_LINUX_RUNTIME_MAC_RUNTIME_FILES}
             DESTINATION "."
@@ -185,6 +193,7 @@ if (WIN32)
     set(SLICER_LINUX_RUNTIME_WSL_INSTALLER_SOURCE ${CMAKE_SOURCE_DIR}/tools/slicer_linux_runtime/wsl/install_runtime.ps1)
     set(SLICER_LINUX_RUNTIME_WSL_INSTALLER_CMD_SOURCE ${CMAKE_SOURCE_DIR}/tools/slicer_linux_runtime/wsl/install_runtime.cmd)
     set(SLICER_LINUX_RUNTIME_WSL_VERIFY_SOURCE ${CMAKE_SOURCE_DIR}/tools/slicer_linux_runtime/wsl/verify_runtime.ps1)
+    set(SLICER_LINUX_RUNTIME_WSL_LAN_PROBE_SOURCE ${CMAKE_SOURCE_DIR}/tools/slicer_linux_runtime/wsl/probe_lan.ps1)
     set(SLICER_LINUX_RUNTIME_WSL_DISTRO_FILE_SOURCE ${CMAKE_SOURCE_DIR}/tools/slicer_linux_runtime/wsl/slicer_linux_runtime_wsl_distro.txt)
     set(SLICER_LINUX_RUNTIME_ASSEMBLER_SOURCE ${CMAKE_SOURCE_DIR}/tools/slicer_linux_runtime/release/assemble_windows_runtime_bundle.ps1)
     set(SLICER_LINUX_RUNTIME_COMPONENT_CACHE_SUBDIR_SOURCE ${CMAKE_SOURCE_DIR}/tools/slicer_linux_runtime/wsl/slicer_linux_runtime_component_dir.txt)
@@ -202,6 +211,9 @@ if (WIN32)
             ${SLICER_LINUX_RUNTIME_WSL_VERIFY_SOURCE}
             $<TARGET_FILE_DIR:slicer_linux_runtime>/verify_runtime.ps1
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${SLICER_LINUX_RUNTIME_WSL_LAN_PROBE_SOURCE}
+            $<TARGET_FILE_DIR:slicer_linux_runtime>/probe_lan.ps1
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
             ${SLICER_LINUX_RUNTIME_WSL_DISTRO_FILE_SOURCE}
             $<TARGET_FILE_DIR:slicer_linux_runtime>/slicer_linux_runtime_wsl_distro.txt
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
@@ -216,6 +228,7 @@ if (WIN32)
         ${SLICER_LINUX_RUNTIME_WSL_INSTALLER_SOURCE}
         ${SLICER_LINUX_RUNTIME_WSL_INSTALLER_CMD_SOURCE}
         ${SLICER_LINUX_RUNTIME_WSL_VERIFY_SOURCE}
+        ${SLICER_LINUX_RUNTIME_WSL_LAN_PROBE_SOURCE}
         ${SLICER_LINUX_RUNTIME_WSL_DISTRO_FILE_SOURCE}
         ${SLICER_LINUX_RUNTIME_ASSEMBLER_SOURCE}
         ${SLICER_LINUX_RUNTIME_COMPONENT_CACHE_SUBDIR_SOURCE}

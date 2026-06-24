@@ -62,9 +62,10 @@ LOCAL_LIMA_ROOT="$APP_SUPPORT_DIR/lima"
 LOCAL_LIMA_BIN="$LOCAL_LIMA_ROOT/bin"
 RUNTIME_DIR="${SLICER_LINUX_RUNTIME_MAC_RUNTIME_DIR:-$APP_SUPPORT_DIR/runtime}"
 LOG_DIR="$APP_SUPPORT_DIR/logs"
-INSTALL_VERSION="SLICER-LINUX-RUNTIME-MAC-0.16"
+INSTALL_VERSION="SLICER-LINUX-RUNTIME-MAC-0.17"
 INSTALL_VERSION_FILE="$APP_SUPPORT_DIR/install_version.txt"
 PROBE_MARKER_FILE="$APP_SUPPORT_DIR/component_probe_marker.txt"
+NETWORK_PROFILE_FILE="$APP_SUPPORT_DIR/network_profile.txt"
 mkdir -p "$APP_SUPPORT_DIR" "$LOCAL_LIMA_ROOT" "$RUNTIME_DIR" "$LOG_DIR"
 
 shell_quote() {
@@ -80,6 +81,34 @@ trim_file() {
         return 1
     fi
     LC_ALL=C tr -d '\r' < "$path" | head -n 1 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
+}
+
+normalize_network_profile() {
+    local value="${1:-default}"
+    case "$value" in
+        default|lan-bridged)
+            printf '%s\n' "$value"
+            ;;
+        *)
+            printf '%s\n' "default"
+            ;;
+    esac
+}
+
+read_network_profile() {
+    if [[ -n "${SLICER_LINUX_RUNTIME_MAC_NETWORK_PROFILE:-}" ]]; then
+        normalize_network_profile "$SLICER_LINUX_RUNTIME_MAC_NETWORK_PROFILE"
+        return 0
+    fi
+    if [[ -f "$NETWORK_PROFILE_FILE" ]]; then
+        normalize_network_profile "$(trim_file "$NETWORK_PROFILE_FILE" || true)"
+        return 0
+    fi
+    printf '%s\n' "default"
+}
+
+runtime_mode_marker() {
+    printf '%s+net-%s\n' "$LIMA_MODE" "$NETWORK_PROFILE"
 }
 
 find_system_limactl() {
@@ -174,8 +203,8 @@ limactl_supports_required_mode() {
     printf '%s\n' "$help" | grep -q -- '--arch' || return 1
     printf '%s\n' "$help" | grep -q -- '--containerd' || return 1
     printf '%s\n' "$help" | grep -q -- '--mount-type' || return 1
-    if [[ "${LIMA_MODE:-}" == "vz-aarch64-rosetta" ]]; then
-        printf '%s\n' "$help" | grep -q -- '--rosetta' || return 1
+    if [[ "${NETWORK_PROFILE:-default}" == "lan-bridged" ]]; then
+        printf '%s\n' "$help" | grep -q -- '--network' || return 1
     fi
 }
 
@@ -310,28 +339,11 @@ portable_x86_loader_available() {
 }
 
 select_lima_mode() {
-    local major host_arch
-    major=$(macos_major)
-    host_arch=$(uname -m)
-    LIMA_MODE=""
-    LIMA_CREATE_ARGS=(start "--name=${INSTANCE}" --tty=false --mount-writable --containerd=none)
-
-    if [[ "$host_arch" == "arm64" ]]; then
-        if [[ "$major" -ge 13 && "${SLICER_LINUX_RUNTIME_MAC_USE_ROSETTA:-}" == "1" && portable_x86_loader_available ]]; then
-            LIMA_MODE="vz-aarch64-rosetta"
-            LIMA_CREATE_ARGS+=(--vm-type=vz --arch=aarch64 --mount-type=virtiofs --rosetta)
-        else
-            LIMA_MODE="qemu-x86_64"
-            LIMA_CREATE_ARGS+=(--vm-type=qemu --arch=x86_64 --mount-type=9p)
-        fi
-    else
-        if [[ "$major" -ge 13 ]]; then
-            LIMA_MODE="vz-x86_64"
-            LIMA_CREATE_ARGS+=(--vm-type=vz --arch=x86_64 --mount-type=virtiofs)
-        else
-            LIMA_MODE="qemu-x86_64"
-            LIMA_CREATE_ARGS+=(--vm-type=qemu --arch=x86_64 --mount-type=9p)
-        fi
+    LIMA_MODE="qemu-x86_64"
+    NETWORK_PROFILE=$(read_network_profile)
+    LIMA_CREATE_ARGS=(start "--name=${INSTANCE}" --tty=false --mount-writable --containerd=none --vm-type=qemu --arch=x86_64 --mount-type=9p)
+    if [[ "$NETWORK_PROFILE" == "lan-bridged" ]]; then
+        LIMA_CREATE_ARGS+=(--network=lima:bridged)
     fi
     if [[ -d /var/folders ]]; then
         LIMA_CREATE_ARGS+=(--mount=/var/folders:w)
@@ -418,7 +430,11 @@ ensure_additional_guestagents_if_needed() {
 
 select_qemu_mode() {
     LIMA_MODE="qemu-x86_64"
+    NETWORK_PROFILE=$(read_network_profile)
     LIMA_CREATE_ARGS=(start "--name=${INSTANCE}" --tty=false --mount-writable --containerd=none --vm-type=qemu --arch=x86_64 --mount-type=9p)
+    if [[ "$NETWORK_PROFILE" == "lan-bridged" ]]; then
+        LIMA_CREATE_ARGS+=(--network=lima:bridged)
+    fi
     if [[ -d /var/folders ]]; then
         LIMA_CREATE_ARGS+=(--mount=/var/folders:w)
     fi
@@ -464,10 +480,7 @@ ensure_lima_installed() {
 }
 
 maybe_install_rosetta() {
-    if [[ "$LIMA_MODE" != "vz-aarch64-rosetta" ]]; then
-        return 0
-    fi
-    /usr/sbin/softwareupdate --install-rosetta --agree-to-license >/dev/null 2>&1 || true
+    return 0
 }
 
 check_optional_pair() {
@@ -619,7 +632,12 @@ linux_component_package_available() {
 component_probe_marker_value() {
     linux_component_package_available || return 1
     local mode
-    mode="${LIMA_MODE:-$(trim_file "$APP_SUPPORT_DIR/lima_mode.txt" || true)}"
+    mode=""
+    if [[ -n "${LIMA_MODE:-}" ]]; then
+        mode=$(runtime_mode_marker)
+    else
+        mode=$(trim_file "$APP_SUPPORT_DIR/lima_mode.txt" || true)
+    fi
     {
         printf 'mode=%s\n' "$mode"
         shasum -a 256 "$RUNTIME_DIR/libbambu_networking.so" "$RUNTIME_DIR/libBambuSource.so"
@@ -638,7 +656,7 @@ if [[ -z "$INSTANCE" ]]; then
 fi
 
 try_current_lima_mode() {
-    echo "Trying Lima mode: $LIMA_MODE" >> "$LOG_DIR/install-probe.log"
+    echo "Trying Lima mode: $(runtime_mode_marker)" >> "$LOG_DIR/install-probe.log"
     if ! start_lima_instance >> "$LOG_DIR/install-probe.log" 2>&1; then
         echo "Lima start failed for mode: $LIMA_MODE" >> "$LOG_DIR/install-probe.log"
         return 1
@@ -650,7 +668,7 @@ try_current_lima_mode() {
             ;;
     esac
 
-    printf '%s\n' "$LIMA_MODE" > "$APP_SUPPORT_DIR/lima_mode.txt"
+    printf '%s\n' "$(runtime_mode_marker)" > "$APP_SUPPORT_DIR/lima_mode.txt"
     if linux_component_package_available; then
         probe_linux_payload >> "$LOG_DIR/install-probe.log" 2>&1
         local marker
@@ -683,7 +701,7 @@ if [[ "$REPLACE_EXISTING" -eq 1 ]]; then
 fi
 copy_runtime_payload "$COMPONENT_DIR" "$RUNTIME_DIR" "$COMPONENT_CACHE_DIR"
 select_lima_mode
-if [[ -f "$APP_SUPPORT_DIR/lima_mode.txt" && "$(trim_file "$APP_SUPPORT_DIR/lima_mode.txt" || true)" != "$LIMA_MODE" ]]; then
+if [[ -f "$APP_SUPPORT_DIR/lima_mode.txt" && "$(trim_file "$APP_SUPPORT_DIR/lima_mode.txt" || true)" != "$(runtime_mode_marker)" ]]; then
     REPLACE_EXISTING=1
 fi
 ensure_qemu_if_needed

@@ -65,9 +65,10 @@ COMPONENT_CACHE_DIR=$(normalize_component_cache_dir "$COMPONENT_CACHE_DIR")
 APP_SUPPORT_DIR="$HOME/Library/Application Support/BambuStudio_OrcaSlicer/slicer-linux-runtime"
 RUNTIME_DIR="${SLICER_LINUX_RUNTIME_MAC_RUNTIME_DIR:-$APP_SUPPORT_DIR/runtime}"
 LOG_DIR="$APP_SUPPORT_DIR/logs"
-INSTALL_VERSION="SLICER-LINUX-RUNTIME-MAC-0.16"
+INSTALL_VERSION="SLICER-LINUX-RUNTIME-MAC-0.17"
 INSTALL_VERSION_FILE="$APP_SUPPORT_DIR/install_version.txt"
 PROBE_MARKER_FILE="$APP_SUPPORT_DIR/component_probe_marker.txt"
+NETWORK_PROFILE_FILE="$APP_SUPPORT_DIR/network_profile.txt"
 mkdir -p "$APP_SUPPORT_DIR" "$LOG_DIR"
 
 shell_quote() {
@@ -83,6 +84,34 @@ trim_file() {
         return 1
     fi
     LC_ALL=C tr -d '\r' < "$path" | head -n 1 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
+}
+
+normalize_network_profile() {
+    local value="${1:-default}"
+    case "$value" in
+        default|lan-bridged)
+            printf '%s\n' "$value"
+            ;;
+        *)
+            printf '%s\n' "default"
+            ;;
+    esac
+}
+
+read_network_profile() {
+    if [[ -n "${SLICER_LINUX_RUNTIME_MAC_NETWORK_PROFILE:-}" ]]; then
+        normalize_network_profile "$SLICER_LINUX_RUNTIME_MAC_NETWORK_PROFILE"
+        return 0
+    fi
+    if [[ -f "$NETWORK_PROFILE_FILE" ]]; then
+        normalize_network_profile "$(trim_file "$NETWORK_PROFILE_FILE" || true)"
+        return 0
+    fi
+    printf '%s\n' "default"
+}
+
+runtime_mode_marker() {
+    printf 'qemu-x86_64+net-%s\n' "$(read_network_profile)"
 }
 
 find_limactl() {
@@ -217,6 +246,15 @@ component_probe_marker_value() {
 
 if [[ ! -f "$INSTALL_VERSION_FILE" || "$(trim_file "$INSTALL_VERSION_FILE" || true)" != "$INSTALL_VERSION" ]]; then
     echo "runtime version marker out of date; reinstall required" >&2
+    exit 1
+fi
+
+expected_mode=$(runtime_mode_marker)
+actual_mode=$(trim_file "$APP_SUPPORT_DIR/lima_mode.txt" || true)
+if [[ "$actual_mode" != "$expected_mode" ]]; then
+    echo "runtime network profile changed; reinstall required" >&2
+    echo "expected: $expected_mode" >&2
+    echo "actual:   ${actual_mode:-<missing>}" >&2
     exit 1
 fi
 

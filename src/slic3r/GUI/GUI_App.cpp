@@ -1526,6 +1526,10 @@ void GUI_App::restart_networking()
         m_agent->set_on_http_error_fn([this](CloudEvent event, unsigned int status, std::string body) {
             this->handle_http_error(status, body, event.provider);
         });
+        if (mainframe && preset_bundle) {
+            BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": switching printer agent after network restart";
+            switch_printer_agent();
+        }
         m_agent->start_discovery(true, false);
         if (mainframe)
             mainframe->refresh_plugin_tips();
@@ -1959,11 +1963,15 @@ void GUI_App::init_networking_callbacks()
                 if (obj) {
                     obj->is_tunnel_mqtt = tunnel;
                     obj->command_request_push_all(true);
-                    obj->command_get_version();
-                    obj->erase_user_access_code();
-                    obj->command_get_access_code();
-                    if (m_agent)
-                        m_agent->install_device_cert(obj->get_dev_id(), obj->is_lan_mode_printer());
+                    if (!is_bmcu_auto_retry_active(obj->get_dev_id())) {
+                        obj->command_get_version();
+                        obj->erase_user_access_code();
+                        obj->command_get_access_code();
+                        if (m_agent)
+                            m_agent->install_device_cert(obj->get_dev_id(), obj->is_lan_mode_printer());
+                    } else {
+                        BOOST_LOG_TRIVIAL(info) << "skip printer connected info/cert refresh during BMCU auto retry, dev_id=" << obj->get_dev_id();
+                    }
                 }
                 });
             });
@@ -3562,6 +3570,8 @@ void copy_local_runtime_files(const boost::filesystem::path& component_folder)
         Slic3r::SlicerLinuxRuntime::windows_wsl_validate_script_file_name(),
         Slic3r::SlicerLinuxRuntime::windows_wsl_bootstrap_script_file_name(),
         legacy_wsl_bootstrap_script_name(),
+        "probe_lan.ps1",
+        "set_runtime_network_profile_macos.sh",
         Slic3r::SlicerLinuxRuntime::windows_wsl_rootfs_file_name(),
         Slic3r::SlicerLinuxRuntime::windows_component_cache_subdir_file_name(),
         "install_runtime.cmd",
@@ -6193,12 +6203,47 @@ void GUI_App::check_new_version_sf(bool show_tips, int by_user)
     http.perform();
 }
 
+void GUI_App::begin_bmcu_auto_retry(const std::string& dev_id, int timeout_ms)
+{
+    if (dev_id.empty()) { return; }
+    std::lock_guard<std::mutex> lock(m_bmcu_auto_retry_mutex);
+    m_bmcu_auto_retry_dev_id = dev_id;
+    m_bmcu_auto_retry_until = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
+    BOOST_LOG_TRIVIAL(info) << "BMCU auto retry guard begin, dev_id=" << dev_id << ", timeout_ms=" << timeout_ms;
+}
+
+void GUI_App::finish_bmcu_auto_retry(const std::string& dev_id)
+{
+    std::lock_guard<std::mutex> lock(m_bmcu_auto_retry_mutex);
+    if (!dev_id.empty() && !m_bmcu_auto_retry_dev_id.empty() && dev_id != m_bmcu_auto_retry_dev_id) { return; }
+    BOOST_LOG_TRIVIAL(info) << "BMCU auto retry guard finish, dev_id=" << m_bmcu_auto_retry_dev_id;
+    m_bmcu_auto_retry_dev_id.clear();
+    m_bmcu_auto_retry_until = {};
+}
+
+bool GUI_App::is_bmcu_auto_retry_active(const std::string& dev_id)
+{
+    std::lock_guard<std::mutex> lock(m_bmcu_auto_retry_mutex);
+    if (m_bmcu_auto_retry_until.time_since_epoch().count() == 0) { return false; }
+    if (std::chrono::steady_clock::now() >= m_bmcu_auto_retry_until) {
+        m_bmcu_auto_retry_dev_id.clear();
+        m_bmcu_auto_retry_until = {};
+        return false;
+    }
+    if (dev_id.empty() || m_bmcu_auto_retry_dev_id.empty()) { return true; }
+    return dev_id == m_bmcu_auto_retry_dev_id;
+}
+
 // return true if handled
 bool GUI_App::process_network_msg(std::string dev_id, std::string msg)
 {
     if (dev_id.empty()) {
         if (msg == "wait_info") {
             BOOST_LOG_TRIVIAL(info) << "process_network_msg, wait_info";
+            if (is_bmcu_auto_retry_active()) {
+                BOOST_LOG_TRIVIAL(info) << "suppress wait_info during BMCU auto retry";
+                return true;
+            }
             Slic3r::DeviceManager* dev = Slic3r::GUI::wxGetApp().getDeviceManager();
             if (!dev)
                 return true;

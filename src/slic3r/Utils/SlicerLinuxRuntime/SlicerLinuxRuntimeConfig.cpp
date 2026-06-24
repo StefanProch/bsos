@@ -266,11 +266,13 @@ bool is_overlay_runtime_filename(const std::string& file_name)
            file_name == mac_lima_instance_file_name() ||
            file_name == mac_runtime_install_script_file_name() ||
            file_name == mac_runtime_verify_script_file_name() ||
+           file_name == "set_runtime_network_profile_macos.sh" ||
            file_name == windows_wsl_distro_file_name() ||
            file_name == windows_wsl_import_script_file_name() ||
            file_name == windows_wsl_validate_script_file_name() ||
            file_name == windows_wsl_bootstrap_script_file_name() ||
            file_name == "slicer_linux_runtime_wsl_run_host.sh" ||
+           file_name == "probe_lan.ps1" ||
            file_name == windows_wsl_rootfs_file_name() ||
            file_name == windows_component_cache_subdir_file_name() ||
            file_name == "ca-certificates.crt" ||
